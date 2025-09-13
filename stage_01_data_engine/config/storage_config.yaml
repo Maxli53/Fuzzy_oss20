@@ -1,0 +1,122 @@
+# ArcticDB Storage Configuration
+# Professional-grade settings for hedge fund infrastructure
+
+# ArcticDB Connection
+arctic:
+  uri: "lmdb://./data/arctic_storage"  # Local LMDB storage
+  # For S3: "s3://bucket-name/path?region=us-east-1"
+  # For Azure: "azure://container-name/path"
+
+# Storage Settings
+storage:
+  enable_compression: true
+  compression_algorithm: "lz4"  # lz4, zstd, snappy
+  cache_size_mb: 1000
+  write_buffer_size_mb: 64
+  max_file_size_mb: 2048
+
+# Library Configuration
+libraries:
+  tick_data:
+    description: "Raw tick data with full metadata"
+    retention_days: 365
+    auto_cleanup: true
+
+  ohlc_5s:
+    description: "Derived 5-second OHLC bars"
+    retention_days: 90
+    auto_cleanup: true
+
+  ohlc_1m:
+    description: "Derived 1-minute OHLC bars"
+    retention_days: 180
+    auto_cleanup: true
+
+  ohlc_5m:
+    description: "Derived 5-minute OHLC bars"
+    retention_days: 365
+    auto_cleanup: false
+
+  adaptive_bars:
+    description: "Adaptive bars (volume, dollar, imbalance)"
+    retention_days: 180
+    auto_cleanup: true
+
+  metadata:
+    description: "System metadata and statistics"
+    retention_days: -1  # Keep forever
+    auto_cleanup: false
+
+# Performance Settings
+performance:
+  parallel_workers: 8           # CPU cores for parallel processing
+  chunk_size: 10000            # Rows per processing chunk
+  batch_size: 1000             # Ticks per batch write
+  memory_limit_mb: 4096        # Max memory usage
+  enable_vectorization: true   # Use NumPy vectorized operations
+
+# Data Quality
+quality:
+  validate_ohlc: true          # Validate High >= Low, etc.
+  remove_duplicates: true      # Remove duplicate timestamps
+  fill_missing_values: false   # Fill missing values (risky for financial data)
+  outlier_detection: true      # Detect price/volume outliers
+  outlier_threshold: 5.0       # Standard deviations for outlier detection
+
+# Logging and Monitoring
+monitoring:
+  log_level: "INFO"            # DEBUG, INFO, WARNING, ERROR
+  enable_performance_logging: true
+  log_slow_queries: true
+  slow_query_threshold_ms: 5000
+  enable_metrics: true
+  metrics_port: 8080
+
+# Real-time Settings
+realtime:
+  buffer_size: 50000           # Ticks to buffer in memory
+  flush_interval_seconds: 60   # Periodic flush to disk
+  enable_partial_bars: true    # Store incomplete bars for monitoring
+  max_latency_ms: 100         # Target latency for real-time processing
+
+# Data Sources
+sources:
+  iqfeed:
+    enabled: true
+    connection_timeout: 30
+    retry_attempts: 3
+    retry_delay: 5
+
+  polygon:
+    enabled: false
+    api_key: "${POLYGON_API_KEY}"
+    rate_limit_requests_per_minute: 300
+
+  alpha_vantage:
+    enabled: false
+    api_key: "${ALPHA_VANTAGE_API_KEY}"
+    rate_limit_requests_per_minute: 500
+
+# Symbol Management
+symbols:
+  watchlist_file: "config/watchlist.txt"
+  auto_discover_symbols: false
+  max_symbols: 500
+  priority_symbols: ["SPY", "QQQ", "AAPL", "MSFT", "TSLA"]
+
+# Error Handling
+error_handling:
+  max_retries: 3
+  retry_delay_seconds: [1, 2, 5]  # Exponential backoff
+  continue_on_error: true
+  log_all_errors: true
+  email_critical_errors: false
+  email_address: "admin@company.com"
+
+# Backup and Recovery
+backup:
+  enabled: false
+  backup_path: "./backups"
+  backup_schedule: "daily"      # daily, weekly, monthly
+  retention_days: 30
+  compress_backups: true
