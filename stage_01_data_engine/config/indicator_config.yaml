@@ -1,0 +1,118 @@
+# DTN Indicator Configuration
+# Maps indicator types to DTN symbols and provides collection parameters
+
+# Market Breadth Indicators
+breadth_indicators:
+  NYSE_TICK: "JTNT.Z"
+  NYSE_ADD: "JINT.Z"           # Advances - Declines
+  NYSE_NET_VOLUME: "JVNT.Z"    # Up Volume - Down Volume
+  NYSE_ISSUES_TOTAL: "TINT.Z"  # Total Issues Trading
+  NASDAQ_TICK: "JTQT.Z"
+  NASDAQ_ADD: "JIQT.Z"
+
+# Trading Index (TRIN) Indicators
+trin_indicators:
+  NYSE_TRIN: "RINT.Z"
+  NASDAQ_TRIN: "RIQT.Z"
+  SP500_TRIN: "RI6T.Z"
+  DOW_TRIN: "RI1T.Z"
+
+# New Highs/Lows
+highs_lows:
+  NYSE_NEW_HIGHS_1D: "H1NH.Z"
+  NYSE_NEW_LOWS_1D: "H1NL.Z"
+  NYSE_NEW_HIGHS_30D: "H30NH.Z"
+  NYSE_NEW_LOWS_30D: "H30NL.Z"
+  NASDAQ_NEW_HIGHS_1D: "H1QH.Z"
+  NASDAQ_NEW_LOWS_1D: "H1QL.Z"
+
+# Moving Average Breadth
+moving_average_breadth:
+  SP500_ABOVE_50MA: "M506V.Z"
+  SP500_BELOW_50MA: "M506B.Z"
+  SP500_ABOVE_200MA: "M2006V.Z"
+  SP500_BELOW_200MA: "M2006B.Z"
+  NASDAQ_ABOVE_50MA: "M50QV.Z"
+  NASDAQ_ABOVE_200MA: "M200QV.Z"
+
+# Options Sentiment Indicators
+options_sentiment:
+  TOTAL_PC_RATIO: "VRQT.Z"        # Total Put/Call Volume Ratio
+  EQUITY_PC_RATIO: "VRRET.Z"      # Equity Put/Call Ratio
+  INDEX_PC_RATIO: "VRIT.Z"        # Index Put/Call Ratio
+  CALL_VOLUME_TOTAL: "VCOET.Z"    # Total Call Volume
+  PUT_VOLUME_TOTAL: "VPOET.Z"     # Total Put Volume
+
+# Options Open Interest
+options_oi:
+  CALL_OI_TOTAL: "OCOET.Z"        # Total Call Open Interest
+  PUT_OI_TOTAL: "OPOET.Z"         # Total Put Open Interest
+  EQUITY_CALL_OI: "OCORET.Z"      # Equity Call Open Interest
+  EQUITY_PUT_OI: "OPORET.Z"       # Equity Put Open Interest
+
+# Options Flow (Tick-based)
+options_flow:
+  CALL_TICKS_TOTAL: "TCOET.Z"     # Call Option Ticks
+  PUT_TICKS_TOTAL: "TPOET.Z"      # Put Option Ticks
+  CALL_ADVANCES: "TCOEA.Z"        # Call Advances
+  PUT_ADVANCES: "TPOEA.Z"         # Put Advances
+
+# Market Premium (Futures vs Cash)
+market_premium:
+  SP500_PREMIUM: "PREM.Z"         # S&P 500 Premium
+  NASDAQ_PREMIUM: "PRNQ.Z"        # NASDAQ Premium
+  DOW_PREMIUM: "PRYM.Z"           # Dow Premium
+
+# Volatility Indicators (if available)
+volatility:
+  VIX: "VIX.XO"                   # CBOE VIX
+  VXN: "VXN.XO"                   # NASDAQ VIX
+  RVX: "RVX.XO"                   # Russell 2000 VIX
+
+# Collection Parameters
+collection_settings:
+  update_frequency_seconds: 1      # How often to collect during market hours
+  batch_size: 100                  # Number of indicators per batch
+  retry_attempts: 3                # Number of retries on failure
+  timeout_seconds: 30              # Timeout for each collection
+
+# Market Hours (Eastern Time)
+market_hours:
+  premarket_start: "04:00:00"
+  market_open: "09:30:00"
+  market_close: "16:00:00"
+  afterhours_end: "20:00:00"
+
+  # When to collect each indicator type
+  collection_schedule:
+    breadth_indicators: ["market_hours", "premarket", "afterhours"]
+    options_sentiment: ["market_hours"]
+    moving_average_breadth: ["market_close", "daily"]
+    market_premium: ["market_hours"]
+
+# Thresholds and Alerts
+alert_thresholds:
+  NYSE_TICK:
+    extreme_positive: 1500
+    extreme_negative: -1500
+    very_positive: 1000
+    very_negative: -1000
+
+  NYSE_TRIN:
+    oversold: 2.0
+    overbought: 0.5
+    extreme_oversold: 3.0
+    extreme_overbought: 0.3
+
+  TOTAL_PC_RATIO:
+    extreme_fear: 1.5
+    extreme_greed: 0.5
+    high_fear: 1.2
+    high_greed: 0.7
+
+# Data Quality
+quality_control:
+  validate_ranges: true
+  outlier_detection: true
+  missing_data_tolerance: 0.05     # 5% missing data tolerance
+  stale_data_seconds: 60           # Consider data stale after 60 seconds

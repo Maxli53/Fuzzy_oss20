@@ -1,0 +1,63 @@
+# Bar Construction Configuration
+# Defines parameters for all bar types
+
+# Classic Bar Types
+tick_bars:
+  default_count: 100
+  min_count: 10
+  max_count: 1000
+
+time_bars:
+  default_seconds: 60
+  available_frequencies: [1, 5, 10, 30, 60, 300, 900, 3600]
+
+# Advanced Bar Types
+volume_bars:
+  small_cap_threshold: 10000
+  mid_cap_threshold: 50000
+  large_cap_threshold: 100000
+  adaptive_multiplier: 1.2
+
+dollar_bars:
+  small_cap_threshold: 1000000    # $1M
+  mid_cap_threshold: 5000000     # $5M
+  large_cap_threshold: 10000000  # $10M
+  adaptive_multiplier: 1.5
+
+imbalance_bars:
+  small_cap_threshold: 5000
+  mid_cap_threshold: 25000
+  large_cap_threshold: 50000
+  min_bucket_size: 1000
+
+volatility_bars:
+  default_threshold: 0.5
+  min_threshold: 0.1
+  max_threshold: 3.0
+  lookback_periods: 20
+
+range_bars:
+  default_size: 0.25
+  min_size: 0.05
+  max_size: 2.0
+  adaptive_percentile: 95
+
+renko_bars:
+  default_brick_size: 0.10
+  min_brick_size: 0.01
+  max_brick_size: 1.0
+  atr_multiplier: 2.0
+
+# Quality Control
+quality_checks:
+  max_ohlc_deviation: 0.1  # 10% max deviation between OHLC
+  min_volume: 1            # Minimum volume per bar
+  max_price_change: 0.2    # 20% max price change per bar
+  outlier_detection: true
+
+# Performance Settings
+performance:
+  batch_size: 1000
+  parallel_processing: true
+  max_workers: 4
+  memory_limit_mb: 512
