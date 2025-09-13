@@ -156,11 +156,12 @@ class TickStore:
                 tick_df.copy(), symbol, 'timestamp'
             )
 
-            # Handle object columns that ArcticDB can't normalize
+            # Handle object/string columns for ArcticDB compatibility
             for col in normalized_df.columns:
-                if normalized_df[col].dtype == 'object' or 'str' in str(normalized_df[col].dtype):
-                    # Convert to pandas string type for ArcticDB compatibility
-                    normalized_df[col] = normalized_df[col].astype('string')
+                col_dtype = str(normalized_df[col].dtype)
+                if normalized_df[col].dtype == 'object' or 'string' in col_dtype:
+                    # Convert to object type (compatible with ArcticDB)
+                    normalized_df[col] = normalized_df[col].astype(str).astype('object')
 
             # Prepare metadata
             tick_metadata = self._prepare_tick_metadata(symbol, date, normalized_df, metadata)

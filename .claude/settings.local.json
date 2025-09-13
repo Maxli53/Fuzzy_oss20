@@ -10,7 +10,8 @@
       "Read(//c/Users/maxli/.cache/huggingface/hub/**)",
       "WebSearch",
       "Bash(python test:*)",
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "Bash(git push:*)"
     ],
     "deny": [],
     "ask": []
