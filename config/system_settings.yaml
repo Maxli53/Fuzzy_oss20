@@ -1,0 +1,64 @@
+# System Configuration
+system:
+  environment: "development"  # development, staging, production
+  debug: true
+  log_level: "INFO"
+
+# Performance Targets
+performance:
+  latency:
+    story_generation: 30  # seconds
+    signal_extraction: 10  # seconds
+    portfolio_integration: 60  # seconds
+    end_to_end: 120  # seconds
+
+  accuracy:
+    directional_accuracy: 0.65  # > 65%
+    story_coherence: 0.8       # > 0.8
+    signal_reliability: 0.7     # > 70%
+    confidence_calibration: 0.15  # < 0.15 difference
+
+  scalability:
+    max_symbols: 500
+    concurrent_users: 100
+    update_frequency: "real_time"
+
+# Storage Configuration
+storage:
+  database:
+    type: "sqlite"  # sqlite, postgresql, redis
+    path: "data/market_data.db"
+    backup_frequency: "daily"
+
+  cache:
+    type: "redis"
+    host: "localhost"
+    port: 6379
+    ttl: 3600  # 1 hour
+
+# Monitoring Configuration
+monitoring:
+  metrics:
+    enabled: true
+    prometheus_port: 8080
+
+  alerting:
+    enabled: true
+    channels:
+      - "console"
+      - "file"
+
+# API Configuration
+api:
+  host: "localhost"
+  port: 8000
+  cors_enabled: true
+  rate_limiting:
+    enabled: true
+    requests_per_minute: 60
+
+# Dashboard Configuration
+dashboard:
+  streamlit_port: 8501
+  auto_refresh: true
+  refresh_interval: 30  # seconds
