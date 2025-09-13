@@ -2,7 +2,15 @@
   "permissions": {
     "allow": [
       "Bash(pip install:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git config:*)",
+      "Bash(gh repo create:*)",
+      "Bash(git remote add:*)",
+      "Read(//c/Users/maxli/.cache/huggingface/hub/**)",
+      "WebSearch",
+      "Bash(python test:*)",
+      "Bash(python:*)"
     ],
     "deny": [],
     "ask": []
