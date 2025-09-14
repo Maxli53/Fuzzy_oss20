@@ -1,0 +1,194 @@
+# ArcticDB Configuration for Exploratory Quantitative Research
+# Flexible schema that adapts to ANY symbol without preconfiguration
+
+arctic:
+  # Connection settings
+  uri: "lmdb://./data/arctic_storage"
+  connection_timeout: 30
+  query_timeout: 120
+
+  # Performance settings
+  compression:
+    enabled: true
+    codec: "lz4"  # Best balance of speed/compression for tick data
+
+  cache:
+    size_mb: 1000
+    enable_write_cache: true
+    enable_read_cache: true
+
+  # Exploratory mode settings
+  exploratory_mode:
+    enabled: true
+    auto_create_libraries: true
+    auto_discover_symbols: true
+    log_symbol_discovery: true
+    max_libraries: 1000  # Prevent runaway library creation
+
+  # Dynamic namespace patterns
+  namespace_patterns:
+    equity:
+      common_stock: "iqfeed/equity/stocks/{symbol}/{data_type}/{date}"
+      etf: "iqfeed/equity/etfs/{symbol}/{data_type}/{date}"
+      index: "iqfeed/equity/indices/{symbol}/{data_type}/{date}"
+      default: "iqfeed/equity/{subcategory}/{symbol}/{data_type}/{date}"
+
+    dtn_calculated:
+      # Based on DTN PDF categories
+      sentiment: "iqfeed/dtn/sentiment/{symbol}/{data_type}/{date}"      # TICK, TRIN
+      breadth: "iqfeed/dtn/breadth/{symbol}/{data_type}/{date}"          # Issues, Highs/Lows
+      volume: "iqfeed/dtn/volume/{symbol}/{data_type}/{date}"            # Volume indicators
+      momentum: "iqfeed/dtn/momentum/{symbol}/{data_type}/{date}"        # Moving averages
+      valuation: "iqfeed/dtn/valuation/{symbol}/{data_type}/{date}"      # Premium indicators
+      options: "iqfeed/dtn/options/{symbol}/{data_type}/{date}"          # Options indicators
+      default: "iqfeed/dtn/{subcategory}/{symbol}/{data_type}/{date}"
+
+    options:
+      default: "iqfeed/options/{underlying}/{symbol}/{data_type}/{date}"
+
+    futures:
+      default: "iqfeed/futures/{underlying}/{symbol}/{data_type}/{date}"
+
+    forex:
+      default: "iqfeed/forex/{base_currency}/{symbol}/{data_type}/{date}"
+
+    unknown:
+      default: "iqfeed/unknown/{category}/{symbol}/{data_type}/{date}"
+
+  # Library naming patterns (for ArcticDB organization)
+  library_patterns:
+    equity:
+      common_stock: "iqfeed_equity_stocks"
+      etf: "iqfeed_equity_etfs"
+      index: "iqfeed_equity_indices"
+      default: "iqfeed_equity_{subcategory}"
+
+    dtn_calculated:
+      # Group by category from DTN PDF analysis
+      sentiment: "iqfeed_dtn_sentiment"
+      breadth: "iqfeed_dtn_breadth"
+      volume: "iqfeed_dtn_volume"
+      momentum: "iqfeed_dtn_momentum"
+      valuation: "iqfeed_dtn_valuation"
+      options: "iqfeed_dtn_options"
+      default: "iqfeed_dtn_{category_group}"
+
+    options:
+      default: "iqfeed_options_{underlying}"
+
+    futures:
+      default: "iqfeed_futures_{underlying}"
+
+    forex:
+      default: "iqfeed_forex"
+
+    polygon:
+      news: "polygon_news"
+      ratings: "polygon_ratings"
+      earnings: "polygon_earnings"
+      default: "polygon_{data_type}"
+
+  # Data retention policies
+  retention:
+    tick_data:
+      market_hours: 8  # trading days
+      after_hours: 180  # calendar days
+
+    bars:
+      intraday: 30  # days
+      daily: 1825  # 5 years
+
+    dtn_indicators:
+      intraday: 60  # days
+      daily: 730  # 2 years
+
+    news_sentiment: 365  # 1 year
+
+    metadata: -1  # Keep forever
+
+  # Storage optimization
+  optimization:
+    partitioning:
+      enabled: true
+      partition_by: ["symbol", "date"]
+
+    indexing:
+      create_symbol_index: true
+      create_date_index: true
+      create_category_index: true
+
+    compression:
+      compress_metadata: true
+      compress_small_datasets: false  # < 1MB
+
+  # Symbol discovery settings
+  discovery:
+    log_new_symbols: true
+    track_access_patterns: true
+    suggest_related_symbols: true
+    max_suggestions: 10
+
+    # Auto-categorization confidence thresholds
+    confidence_thresholds:
+      high: 0.9  # Auto-store without confirmation
+      medium: 0.7  # Log for review
+      low: 0.5  # Flag as uncertain
+
+  # Data quality settings
+  quality:
+    validation:
+      enabled: true
+      check_timestamps: true
+      check_price_bounds: true
+      check_volume_bounds: true
+      outlier_detection: true
+
+    bounds:
+      price_min: 0.01
+      price_max: 50000.0
+      volume_min: 0
+      volume_max: 10000000000
+
+    outlier_detection:
+      method: "zscore"
+      threshold: 3.0
+
+  # Performance monitoring
+  monitoring:
+    track_storage_stats: true
+    track_query_performance: true
+    alert_on_errors: true
+
+    alerts:
+      storage_size_mb: 10000  # Alert when > 10GB
+      query_time_seconds: 30  # Alert when queries > 30s
+      error_rate_percent: 5   # Alert when > 5% errors
+
+# Integration settings
+integration:
+  collectors:
+    iqfeed:
+      use_flexible_storage: true
+      auto_categorize: true
+      store_metadata: true
+
+    polygon:
+      use_flexible_storage: true
+      rate_limit_aware: true
+
+  data_engine:
+    enable_universe_tracking: true
+    cache_symbol_metadata: true
+    suggest_related_data: true
+
+# Development settings
+development:
+  debug_mode: false
+  verbose_logging: false
+  test_mode: false
+
+  # Test data settings (only used in test_mode)
+  test_data:
+    generate_synthetic: false
+    use_sample_symbols: ["AAPL", "MSFT", "JTNT.Z"]
+    max_test_records: 1000

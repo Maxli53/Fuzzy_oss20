@@ -21,6 +21,7 @@ from stage_01_data_engine.core.base_collector import BaseCollector, StorageNames
 from stage_01_data_engine.core.config_loader import get_config
 from stage_01_data_engine.connector import IQFeedConnector
 from stage_01_data_engine.storage.bar_builder import BarBuilder
+from stage_01_data_engine.parsers.dtn_symbol_parser import DTNSymbolParser
 import pyiqfeed as iq
 
 # Load environment variables
@@ -45,6 +46,9 @@ class IQFeedCollector(BaseCollector):
         # Initialize IQFeed connector
         self.connector = IQFeedConnector()
 
+        # Initialize symbol parser for flexible fetching
+        self.symbol_parser = DTNSymbolParser()
+
         # Load configurations
         self.indicator_config = get_config('indicator', default={})
         self.bar_config = get_config('bar', default={})
@@ -53,7 +57,7 @@ class IQFeedCollector(BaseCollector):
         # Build indicator mappings
         self._build_indicator_mappings()
 
-        logger.info("IQFeedCollector initialized with unified data access")
+        logger.info("IQFeedCollector initialized with unified data access and flexible symbol parsing")
 
     def _build_indicator_mappings(self):
         """Build complete DTN indicator mappings with clear structure"""
@@ -117,22 +121,43 @@ class IQFeedCollector(BaseCollector):
                     try:
                         logger.info(f"Collecting tick data for {symbol}")
 
-                        # Get tick data
-                        tick_data = hist_conn.request_tick_data(
+                        # Get most recent tick data (like IQFeed terminal)
+                        tick_data = hist_conn.request_ticks(
                             ticker=symbol,
-                            num_days=lookback_days
+                            max_ticks=kwargs.get('max_ticks', 1000)
                         )
 
-                        if tick_data and len(tick_data) > 0:
+                        if tick_data is not None and len(tick_data) > 0:
                             for tick in tick_data:
                                 try:
+                                    # Handle numpy structured array - access fields directly
+                                    # Convert IQFeed timestamp properly
+                                    date_str = str(tick['date'])
+
+                                    # Convert numpy.timedelta64 to microseconds
+                                    if isinstance(tick['time'], np.timedelta64):
+                                        time_microseconds = int(tick['time'] / np.timedelta64(1, 'us'))
+                                    else:
+                                        time_microseconds = 0
+
+                                    # Convert microseconds since midnight to time
+                                    hours = time_microseconds // 3600000000
+                                    minutes = (time_microseconds % 3600000000) // 60000000
+                                    seconds = (time_microseconds % 60000000) // 1000000
+                                    microseconds = time_microseconds % 1000000
+
+                                    time_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}.{microseconds:06d}"
+
                                     tick_record = {
-                                        'timestamp': pd.to_datetime(f"{tick['date']} {tick['time']}"),
+                                        'timestamp': pd.to_datetime(f"{date_str} {time_str}"),
                                         'symbol': symbol,
-                                        'price': float(tick.get('last', 0)),
-                                        'volume': int(tick.get('volume', 0)),
-                                        'bid': float(tick.get('bid', 0)) if tick.get('bid') else None,
-                                        'ask': float(tick.get('ask', 0)) if tick.get('ask') else None
+                                        'price': float(tick['last']),
+                                        'volume': int(tick['last_sz']),  # last_sz is the trade size
+                                        'bid': float(tick['bid']),
+                                        'ask': float(tick['ask']),
+                                        'tick_id': int(tick['tick_id']),
+                                        'market_center': int(tick['mkt_ctr']),
+                                        'total_volume': int(tick['tot_vlm'])
                                     }
                                     all_ticks.append(tick_record)
 
@@ -238,23 +263,48 @@ class IQFeedCollector(BaseCollector):
                             )
                         else:
                             seconds = interval_map.get(bar_type, 60)
-                            bar_data = hist_conn.request_interval_data(
+                            bar_data = hist_conn.request_bars_for_days(
                                 ticker=symbol,
                                 interval_len=seconds,
-                                num_days=lookback_days
+                                interval_type='s',
+                                days=lookback_days
                             )
 
-                        if bar_data and len(bar_data) > 0:
+                        if bar_data is not None and len(bar_data) > 0:
                             for bar in bar_data:
                                 try:
+                                    # Handle numpy structured array - access fields directly
+                                    # Convert IQFeed timestamp format properly
+                                    date_str = str(bar['date'])
+
+                                    # Handle time field - numpy.timedelta64 from IQFeed
+                                    if 'time' in bar.dtype.names:
+                                        time_val = bar['time']
+                                        if isinstance(time_val, np.timedelta64):
+                                            # Convert numpy.timedelta64 to microseconds properly
+                                            time_microseconds = int(time_val / np.timedelta64(1, 'us'))
+                                        else:
+                                            # Fallback for other types
+                                            time_microseconds = 0
+                                    else:
+                                        time_microseconds = 0
+
+                                    # Convert microseconds since midnight to time
+                                    hours = time_microseconds // 3600000000
+                                    minutes = (time_microseconds % 3600000000) // 60000000
+                                    seconds = (time_microseconds % 60000000) // 1000000
+                                    microseconds = time_microseconds % 1000000
+
+                                    time_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}.{microseconds:06d}"
+
                                     bar_record = {
-                                        'timestamp': pd.to_datetime(f"{bar['date']} {bar.get('time', '00:00:00')}"),
+                                        'timestamp': pd.to_datetime(f"{date_str} {time_str}"),
                                         'symbol': symbol,
-                                        'open': float(bar.get('open_p', 0)),
-                                        'high': float(bar.get('high_p', 0)),
-                                        'low': float(bar.get('low_p', 0)),
-                                        'close': float(bar.get('close_p', 0)),
-                                        'volume': int(bar.get('prd_vlm', 0))
+                                        'open': float(bar['open_p']),
+                                        'high': float(bar['high_p']),
+                                        'low': float(bar['low_p']),
+                                        'close': float(bar['close_p']),
+                                        'volume': int(bar['prd_vlm'])
                                     }
                                     all_bars.append(bar_record)
 
@@ -602,3 +652,333 @@ class IQFeedCollector(BaseCollector):
         """Generate storage key for IQFeed data"""
         data_type = kwargs.get('data_type', 'ticks')
         return StorageNamespace.iqfeed_key(f"{data_type}_{symbol}", date)
+
+    # ===========================================
+    # FLEXIBLE SYMBOL FETCHING (Exploratory Research)
+    # ===========================================
+
+    def fetch(self, symbols: Union[str, List[str]], **kwargs) -> Dict[str, pd.DataFrame]:
+        """
+        Flexible fetch method that can collect ANY symbol without preconfiguration.
+        Perfect for exploratory quantitative research.
+
+        Args:
+            symbols: Any symbol(s) - stocks, options, futures, DTN indicators
+            data_type: 'auto' (detect), 'ticks', 'bars', 'quotes', 'options_chain'
+            lookback_days: Number of days to look back
+            auto_categorize: Whether to use symbol parser for smart routing
+
+        Returns:
+            Dict mapping symbol to collected DataFrame
+        """
+        if isinstance(symbols, str):
+            symbols = [symbols]
+
+        data_type = kwargs.get('data_type', 'auto')
+        auto_categorize = kwargs.get('auto_categorize', True)
+
+        # Remove data_type from kwargs to avoid parameter collision
+        kwargs_clean = {k: v for k, v in kwargs.items() if k != 'data_type'}
+
+        results = {}
+
+        for symbol in symbols:
+            try:
+                logger.info(f"Fetching data for symbol: {symbol}")
+
+                # Parse symbol for smart routing
+                if auto_categorize:
+                    symbol_info = self.symbol_parser.parse_symbol(symbol)
+                    logger.info(f"Symbol {symbol} categorized as: {symbol_info.category}/{symbol_info.subcategory}")
+
+                    # Route to appropriate collection method
+                    if symbol_info.category == 'dtn_calculated':
+                        df = self._fetch_dtn_indicator(symbol, **kwargs_clean)
+                    elif symbol_info.category == 'options':
+                        df = self._fetch_options_data(symbol, **kwargs_clean)
+                    elif symbol_info.category == 'futures':
+                        df = self._fetch_futures_data(symbol, **kwargs_clean)
+                    elif symbol_info.category == 'forex':
+                        df = self._fetch_forex_data(symbol, **kwargs_clean)
+                    else:  # equity or unknown
+                        df = self._fetch_equity_data(symbol, data_type, **kwargs_clean)
+                else:
+                    # Manual data type specification
+                    df = self._fetch_by_data_type(symbol, data_type, **kwargs_clean)
+
+                if df is not None and not df.empty:
+                    results[symbol] = df
+                    logger.info(f"Successfully fetched {len(df)} records for {symbol}")
+                else:
+                    logger.warning(f"No data returned for {symbol}")
+
+            except Exception as e:
+                logger.error(f"Error fetching data for {symbol}: {e}")
+                continue
+
+        return results
+
+    def collect_stock_prices(self, symbols: Union[str, List[str]],
+                           lookback_days: int = 22,
+                           bar_type: str = '1d') -> Optional[pd.DataFrame]:
+        """
+        Collect stock price data (OHLCV) for regular equities.
+
+        Args:
+            symbols: Stock symbols
+            lookback_days: Number of trading days
+            bar_type: '1d', '1h', '15m', '5m', '1m'
+
+        Returns:
+            DataFrame with OHLCV data
+        """
+        logger.info(f"Collecting stock prices for {symbols} ({lookback_days} days, {bar_type} bars)")
+        return self.collect_bars(symbols, bar_type=bar_type, lookback_days=lookback_days)
+
+    def collect_realtime_quotes(self, symbols: Union[str, List[str]]) -> Optional[pd.DataFrame]:
+        """
+        Collect real-time Level 1 quotes.
+
+        Args:
+            symbols: Stock symbols
+
+        Returns:
+            DataFrame with current quotes (bid, ask, last, volume)
+        """
+        if isinstance(symbols, str):
+            symbols = [symbols]
+
+        if not self.connector.connect():
+            logger.error("Failed to connect to IQFeed")
+            return None
+
+        all_quotes = []
+
+        try:
+            lookup_conn = self.connector.get_lookup_connection()
+            if not lookup_conn:
+                logger.error("Failed to get lookup connection")
+                return None
+
+            with iq.ConnConnector([lookup_conn]) as connector:
+                for symbol in symbols:
+                    try:
+                        logger.info(f"Getting real-time quote for {symbol}")
+
+                        quote_data = lookup_conn.request_current_update_fieldnames(symbol)
+
+                        if quote_data:
+                            quote_record = {
+                                'timestamp': pd.Timestamp.now(),
+                                'symbol': symbol,
+                                'last': float(quote_data.get('Last', 0)),
+                                'bid': float(quote_data.get('Bid', 0)) if quote_data.get('Bid') else None,
+                                'ask': float(quote_data.get('Ask', 0)) if quote_data.get('Ask') else None,
+                                'volume': int(quote_data.get('Volume', 0)) if quote_data.get('Volume') else None,
+                                'change': float(quote_data.get('Change', 0)) if quote_data.get('Change') else None,
+                                'percent_change': float(quote_data.get('Percent Change', 0)) if quote_data.get('Percent Change') else None,
+                                'high': float(quote_data.get('High', 0)) if quote_data.get('High') else None,
+                                'low': float(quote_data.get('Low', 0)) if quote_data.get('Low') else None,
+                                'open': float(quote_data.get('Open', 0)) if quote_data.get('Open') else None
+                            }
+                            all_quotes.append(quote_record)
+                            self.update_stats(1, success=True)
+                        else:
+                            logger.warning(f"No quote data for {symbol}")
+                            self.update_stats(0, success=False)
+
+                    except Exception as e:
+                        logger.error(f"Error getting quote for {symbol}: {e}")
+                        self.update_stats(0, success=False)
+                        continue
+
+        except Exception as e:
+            logger.error(f"Error in quote collection: {e}")
+            return None
+        finally:
+            self.connector.disconnect()
+
+        if not all_quotes:
+            return None
+
+        return pd.DataFrame(all_quotes)
+
+    def collect_options_chain(self, underlying_symbol: str,
+                            expiration_dates: Optional[List[str]] = None) -> Optional[pd.DataFrame]:
+        """
+        Collect options chain data for an underlying symbol.
+
+        Args:
+            underlying_symbol: The underlying stock symbol (e.g., 'AAPL')
+            expiration_dates: List of expiration dates (YYYY-MM-DD), None for all
+
+        Returns:
+            DataFrame with options chain data
+        """
+        logger.info(f"Collecting options chain for {underlying_symbol}")
+
+        if not self.connector.connect():
+            logger.error("Failed to connect to IQFeed")
+            return None
+
+        all_options = []
+
+        try:
+            lookup_conn = self.connector.get_lookup_connection()
+            if not lookup_conn:
+                logger.error("Failed to get lookup connection")
+                return None
+
+            with iq.ConnConnector([lookup_conn]) as connector:
+                # Request options chain (this might require specific IQFeed API calls)
+                # For now, implementing basic structure - may need refinement based on IQFeed API
+                logger.warning("Options chain collection requires specific IQFeed API - implementing placeholder")
+
+                # Placeholder implementation
+                option_record = {
+                    'timestamp': pd.Timestamp.now(),
+                    'underlying_symbol': underlying_symbol,
+                    'option_symbol': f"{underlying_symbol}_OPTION_PLACEHOLDER",
+                    'expiration_date': '2024-03-15',
+                    'strike_price': 150.0,
+                    'option_type': 'C',
+                    'last_price': 5.25,
+                    'bid': 5.20,
+                    'ask': 5.30,
+                    'volume': 100,
+                    'open_interest': 500,
+                    'implied_volatility': 0.25
+                }
+                all_options.append(option_record)
+
+        except Exception as e:
+            logger.error(f"Error collecting options chain for {underlying_symbol}: {e}")
+            return None
+        finally:
+            self.connector.disconnect()
+
+        if not all_options:
+            return None
+
+        return pd.DataFrame(all_options)
+
+    # ===========================================
+    # HELPER METHODS FOR FLEXIBLE FETCHING
+    # ===========================================
+
+    def _fetch_equity_data(self, symbol: str, data_type: str, **kwargs) -> Optional[pd.DataFrame]:
+        """Fetch data for equity symbols"""
+        if data_type == 'auto' or data_type == 'bars':
+            return self.collect_bars([symbol], **kwargs)
+        elif data_type == 'ticks':
+            return self.collect_ticks([symbol], **kwargs)
+        elif data_type == 'quotes':
+            return self.collect_realtime_quotes([symbol])
+        else:
+            # Default to bars
+            return self.collect_bars([symbol], **kwargs)
+
+    def _fetch_dtn_indicator(self, symbol: str, **kwargs) -> Optional[pd.DataFrame]:
+        """Fetch DTN calculated indicator data"""
+        # Parse the indicator category
+        symbol_info = self.symbol_parser.parse_symbol(symbol)
+
+        if symbol_info.subcategory in ['net_tick', 'trin']:
+            # Sentiment indicators
+            equities_data = self.collect_equities_index_stats()
+            category = symbol_info.subcategory
+            if category in equities_data:
+                df = equities_data[category]
+                return df[df['symbol'] == symbol] if not df.empty else None
+
+        elif 'options' in symbol_info.subcategory:
+            # Options indicators
+            options_data = self.collect_options_stats()
+            for category, df in options_data.items():
+                symbol_data = df[df['symbol'] == symbol] if not df.empty else pd.DataFrame()
+                if not symbol_data.empty:
+                    return symbol_data
+
+        # Generic DTN indicator fetch
+        logger.warning(f"Generic DTN indicator fetch for {symbol} - may need specific implementation")
+        return None
+
+    def _fetch_options_data(self, symbol: str, **kwargs) -> Optional[pd.DataFrame]:
+        """Fetch options contract data"""
+        # Extract underlying from options symbol
+        symbol_info = self.symbol_parser.parse_symbol(symbol)
+        underlying = symbol_info.underlying
+
+        if underlying:
+            # Try to get the specific option data
+            # For now, return options chain for underlying
+            return self.collect_options_chain(underlying)
+
+        return None
+
+    def _fetch_futures_data(self, symbol: str, **kwargs) -> Optional[pd.DataFrame]:
+        """Fetch futures contract data"""
+        # Futures data collection (similar to equity bars)
+        return self.collect_bars([symbol], **kwargs)
+
+    def _fetch_forex_data(self, symbol: str, **kwargs) -> Optional[pd.DataFrame]:
+        """Fetch forex pair data"""
+        # Forex data collection (similar to equity bars)
+        return self.collect_bars([symbol], **kwargs)
+
+    def _fetch_by_data_type(self, symbol: str, data_type: str, **kwargs) -> Optional[pd.DataFrame]:
+        """Manual data type routing"""
+        if data_type == 'ticks':
+            return self.collect_ticks([symbol], **kwargs)
+        elif data_type == 'bars':
+            return self.collect_bars([symbol], **kwargs)
+        elif data_type == 'quotes':
+            return self.collect_realtime_quotes([symbol])
+        elif data_type == 'options_chain':
+            return self.collect_options_chain(symbol)
+        else:
+            logger.error(f"Unknown data_type: {data_type}")
+            return None
+
+    def explore_symbol(self, symbol: str) -> Dict:
+        """
+        Explore a symbol to understand what data is available.
+        Perfect for exploratory research.
+
+        Args:
+            symbol: Any symbol to explore
+
+        Returns:
+            Dict with symbol info and available data types
+        """
+        symbol_info = self.symbol_parser.parse_symbol(symbol)
+
+        exploration = {
+            'symbol': symbol,
+            'parsed_info': {
+                'category': symbol_info.category,
+                'subcategory': symbol_info.subcategory,
+                'exchange': symbol_info.exchange,
+                'underlying': symbol_info.underlying,
+                'metadata': symbol_info.metadata
+            },
+            'storage_namespace': symbol_info.storage_namespace,
+            'recommended_data_types': self._get_recommended_data_types(symbol_info),
+            'exploration_timestamp': pd.Timestamp.now().isoformat()
+        }
+
+        logger.info(f"Explored symbol {symbol}: {symbol_info.category}/{symbol_info.subcategory}")
+        return exploration
+
+    def _get_recommended_data_types(self, symbol_info) -> List[str]:
+        """Get recommended data types for a symbol category"""
+        recommendations = {
+            'equity': ['bars', 'ticks', 'quotes'],
+            'dtn_calculated': ['snapshot', 'historical'],
+            'options': ['quotes', 'chain', 'greeks'],
+            'futures': ['bars', 'ticks'],
+            'forex': ['bars', 'ticks'],
+            'unknown': ['bars', 'quotes']
+        }
+
+        return recommendations.get(symbol_info.category, ['bars'])

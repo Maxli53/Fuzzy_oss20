@@ -456,3 +456,356 @@ class PolygonCollector(BaseCollector):
                 continue
 
         return comprehensive_sentiment
+
+    # ===========================================
+    # ADVANCED LOGIC FOR FUTURE API UPGRADE
+    # ===========================================
+
+    def get_market_wide_sentiment(self, sectors: Optional[List[str]] = None) -> Dict[str, float]:
+        """
+        Get market-wide sentiment aggregation across all news sources.
+        Ready for when API is upgraded to paid tier.
+
+        Args:
+            sectors: Specific sectors to analyze (e.g., ['tech', 'finance'])
+
+        Returns:
+            Dict with aggregated sentiment metrics
+        """
+        logger.info("Computing market-wide sentiment aggregation")
+
+        try:
+            # For now, use free tier limitations
+            # When upgraded, this will fetch news for all S&P 500 or broader universe
+            sample_symbols = ['AAPL', 'MSFT', 'GOOGL', 'TSLA', 'AMZN']  # Limited sample for free tier
+
+            market_sentiment = {
+                'overall_sentiment': 0.0,
+                'news_volume': 0,
+                'positive_ratio': 0.0,
+                'negative_ratio': 0.0,
+                'neutral_ratio': 0.0,
+                'urgency_score': 0.0,
+                'trending_topics': [],
+                'sentiment_volatility': 0.0,
+                'sector_breakdown': {}
+            }
+
+            all_sentiment_scores = []
+            total_news_count = 0
+
+            for symbol in sample_symbols:
+                try:
+                    # Collect news with rate limiting for free tier
+                    news_df = self.collect_news_sentiment([symbol], lookback_days=3)  # Shorter lookback for free tier
+
+                    if news_df is not None and not news_df.empty:
+                        sentiment_scores = news_df['sentiment'].dropna()
+                        all_sentiment_scores.extend(sentiment_scores.tolist())
+                        total_news_count += len(news_df)
+
+                        # Extract trending topics (keywords)
+                        for keywords in news_df['keywords'].dropna():
+                            if keywords:
+                                market_sentiment['trending_topics'].extend(keywords.split(', ')[:3])  # Limit keywords
+
+                except Exception as e:
+                    logger.warning(f"Error processing sentiment for {symbol}: {e}")
+                    continue
+
+            # Aggregate metrics
+            if all_sentiment_scores:
+                market_sentiment['overall_sentiment'] = np.mean(all_sentiment_scores)
+                market_sentiment['sentiment_volatility'] = np.std(all_sentiment_scores)
+
+                # Calculate ratios
+                positive_count = sum(1 for s in all_sentiment_scores if s > 0.1)
+                negative_count = sum(1 for s in all_sentiment_scores if s < -0.1)
+                neutral_count = len(all_sentiment_scores) - positive_count - negative_count
+
+                total = len(all_sentiment_scores)
+                market_sentiment['positive_ratio'] = positive_count / total if total > 0 else 0
+                market_sentiment['negative_ratio'] = negative_count / total if total > 0 else 0
+                market_sentiment['neutral_ratio'] = neutral_count / total if total > 0 else 0
+
+            market_sentiment['news_volume'] = total_news_count
+
+            # Clean up trending topics
+            topic_counts = {}
+            for topic in market_sentiment['trending_topics']:
+                topic_counts[topic] = topic_counts.get(topic, 0) + 1
+
+            # Get top trending topics
+            market_sentiment['trending_topics'] = [
+                topic for topic, count in sorted(topic_counts.items(), key=lambda x: x[1], reverse=True)[:10]
+            ]
+
+            logger.info(f"Market sentiment: {market_sentiment['overall_sentiment']:.3f}, News volume: {total_news_count}")
+
+            # Note for future API upgrade
+            if total_news_count < 50:
+                logger.warning("Limited news volume due to free tier API - upgrade to paid tier for comprehensive analysis")
+
+            return market_sentiment
+
+        except Exception as e:
+            logger.error(f"Error computing market-wide sentiment: {e}")
+            return {'overall_sentiment': 0.0, 'error': str(e)}
+
+    def discover_symbols_from_news(self, lookback_days: int = 7, min_mentions: int = 3) -> List[str]:
+        """
+        Discover new symbols mentioned frequently in news.
+        Perfect for expanding universe dynamically.
+
+        Args:
+            lookback_days: Days to look back for news
+            min_mentions: Minimum mentions to include symbol
+
+        Returns:
+            List of discovered symbols sorted by mention frequency
+        """
+        logger.info(f"Discovering symbols from news mentions (last {lookback_days} days)")
+
+        discovered_symbols = {}
+
+        try:
+            # For free tier, check broader market news
+            # When upgraded, this could search all news without ticker filtering
+            broad_symbols = ['SPY', 'QQQ', 'AAPL', 'TSLA']  # Market leaders likely to mention other stocks
+
+            for symbol in broad_symbols:
+                try:
+                    news_df = self.collect_news_sentiment([symbol], lookback_days=lookback_days)
+
+                    if news_df is not None and not news_df.empty:
+                        # Extract mentioned symbols from titles and descriptions
+                        for _, article in news_df.iterrows():
+                            text = f"{article.get('title', '')} {article.get('description', '')}"
+                            mentioned_symbols = self._extract_symbols_from_text(text)
+
+                            for mentioned_symbol in mentioned_symbols:
+                                if mentioned_symbol != symbol and mentioned_symbol.isalpha():  # Filter valid symbols
+                                    discovered_symbols[mentioned_symbol] = discovered_symbols.get(mentioned_symbol, 0) + 1
+
+                except Exception as e:
+                    logger.warning(f"Error discovering from {symbol}: {e}")
+                    continue
+
+            # Filter by minimum mentions and sort by frequency
+            filtered_symbols = [
+                symbol for symbol, count in discovered_symbols.items()
+                if count >= min_mentions and len(symbol) <= 5  # Reasonable symbol length
+            ]
+
+            # Sort by mention frequency
+            sorted_symbols = sorted(
+                filtered_symbols,
+                key=lambda s: discovered_symbols[s],
+                reverse=True
+            )
+
+            logger.info(f"Discovered {len(sorted_symbols)} symbols: {sorted_symbols[:10]}")
+
+            # Note for future API upgrade
+            if len(sorted_symbols) < 10:
+                logger.warning("Limited symbol discovery due to free tier - upgrade for comprehensive universe expansion")
+
+            return sorted_symbols[:25]  # Return top 25
+
+        except Exception as e:
+            logger.error(f"Error discovering symbols from news: {e}")
+            return []
+
+    def get_cross_asset_sentiment(self, asset_classes: Optional[List[str]] = None) -> Dict[str, Dict]:
+        """
+        Get sentiment analysis across different asset classes.
+        Ready for comprehensive cross-asset analysis when API is upgraded.
+
+        Args:
+            asset_classes: ['equities', 'crypto', 'commodities', 'bonds']
+
+        Returns:
+            Dict with sentiment by asset class
+        """
+        asset_classes = asset_classes or ['equities']
+
+        cross_asset_sentiment = {}
+
+        try:
+            # Map asset classes to representative symbols (limited by free tier)
+            asset_symbols = {
+                'equities': ['AAPL', 'MSFT', 'GOOGL'],
+                'crypto': ['BTC', 'ETH'],  # May not work with free tier
+                'commodities': ['GLD', 'SLV', 'USO'],
+                'bonds': ['TLT', 'TBT']
+            }
+
+            for asset_class in asset_classes:
+                symbols = asset_symbols.get(asset_class, [])
+                if not symbols:
+                    continue
+
+                class_sentiment = {
+                    'average_sentiment': 0.0,
+                    'sentiment_range': 0.0,
+                    'news_volume': 0,
+                    'top_movers': []
+                }
+
+                all_scores = []
+                symbol_sentiments = {}
+
+                for symbol in symbols[:3]:  # Limit for free tier
+                    try:
+                        news_df = self.collect_news_sentiment([symbol], lookback_days=5)
+
+                        if news_df is not None and not news_df.empty:
+                            avg_sentiment = news_df['sentiment'].mean()
+                            symbol_sentiments[symbol] = avg_sentiment
+                            all_scores.append(avg_sentiment)
+                            class_sentiment['news_volume'] += len(news_df)
+
+                    except Exception as e:
+                        logger.warning(f"Error processing {asset_class} symbol {symbol}: {e}")
+                        continue
+
+                # Calculate class metrics
+                if all_scores:
+                    class_sentiment['average_sentiment'] = np.mean(all_scores)
+                    class_sentiment['sentiment_range'] = max(all_scores) - min(all_scores)
+
+                    # Top movers by sentiment
+                    sorted_symbols = sorted(
+                        symbol_sentiments.items(),
+                        key=lambda x: abs(x[1]),
+                        reverse=True
+                    )
+                    class_sentiment['top_movers'] = sorted_symbols[:3]
+
+                cross_asset_sentiment[asset_class] = class_sentiment
+
+                logger.info(f"{asset_class} sentiment: {class_sentiment['average_sentiment']:.3f}")
+
+            return cross_asset_sentiment
+
+        except Exception as e:
+            logger.error(f"Error getting cross-asset sentiment: {e}")
+            return {}
+
+    def _extract_symbols_from_text(self, text: str) -> List[str]:
+        """Extract potential stock symbols from text"""
+        import re
+
+        # Look for patterns like $AAPL, AAPL, or common stock mention patterns
+        patterns = [
+            r'\$([A-Z]{2,5})',  # $AAPL format
+            r'\b([A-Z]{2,5})\b',  # Standalone caps (be careful with false positives)
+        ]
+
+        symbols = set()
+        text_upper = text.upper()
+
+        for pattern in patterns:
+            matches = re.findall(pattern, text_upper)
+            symbols.update(matches)
+
+        # Filter out common false positives
+        false_positives = {
+            'THE', 'AND', 'FOR', 'ARE', 'BUT', 'NOT', 'YOU', 'ALL', 'CAN', 'HAD', 'HER', 'WAS', 'ONE',
+            'OUR', 'OUT', 'DAY', 'GET', 'HAS', 'HIM', 'HIS', 'HOW', 'ITS', 'MAY', 'NEW', 'NOW', 'OLD',
+            'SEE', 'TWO', 'WHO', 'BOY', 'DID', 'ITS', 'LET', 'PUT', 'SAY', 'SHE', 'TOO', 'USE',
+            'CEO', 'CFO', 'CTO', 'IPO', 'SEC', 'FDA', 'ETF', 'API', 'APP'  # Business terms
+        }
+
+        filtered_symbols = [s for s in symbols if s not in false_positives and len(s) >= 2]
+        return list(filtered_symbols)
+
+    def get_sentiment_alerts(self, threshold: float = 0.5, lookback_hours: int = 24) -> List[Dict]:
+        """
+        Get sentiment-based alerts for significant market movements.
+        Ready for real-time alerting when API is upgraded.
+
+        Args:
+            threshold: Sentiment threshold for alerts
+            lookback_hours: Hours to look back for alerts
+
+        Returns:
+            List of alert dictionaries
+        """
+        logger.info(f"Checking sentiment alerts (threshold: {threshold})")
+
+        alerts = []
+
+        try:
+            # Sample symbols for free tier
+            watch_symbols = ['AAPL', 'TSLA', 'NVDA', 'SPY']
+
+            for symbol in watch_symbols:
+                try:
+                    # Get recent news
+                    news_df = self.collect_news_sentiment([symbol], lookback_days=1)
+
+                    if news_df is not None and not news_df.empty:
+                        # Filter recent news (within lookback_hours)
+                        cutoff_time = pd.Timestamp.now() - pd.Timedelta(hours=lookback_hours)
+                        recent_news = news_df[news_df['timestamp'] > cutoff_time]
+
+                        if not recent_news.empty:
+                            avg_sentiment = recent_news['sentiment'].mean()
+                            max_sentiment = recent_news['sentiment'].max()
+                            min_sentiment = recent_news['sentiment'].min()
+
+                            # Check for alert conditions
+                            if abs(avg_sentiment) >= threshold or abs(max_sentiment) >= threshold or abs(min_sentiment) >= threshold:
+                                alert = {
+                                    'symbol': symbol,
+                                    'alert_time': pd.Timestamp.now().isoformat(),
+                                    'avg_sentiment': avg_sentiment,
+                                    'max_sentiment': max_sentiment,
+                                    'min_sentiment': min_sentiment,
+                                    'news_count': len(recent_news),
+                                    'urgency': 'HIGH' if abs(avg_sentiment) > 0.7 else 'MEDIUM',
+                                    'top_headline': recent_news.iloc[0]['title'] if len(recent_news) > 0 else ''
+                                }
+                                alerts.append(alert)
+
+                except Exception as e:
+                    logger.warning(f"Error checking alerts for {symbol}: {e}")
+                    continue
+
+            logger.info(f"Generated {len(alerts)} sentiment alerts")
+
+            # Sort by urgency and sentiment strength
+            alerts.sort(key=lambda x: abs(x['avg_sentiment']), reverse=True)
+
+            return alerts
+
+        except Exception as e:
+            logger.error(f"Error generating sentiment alerts: {e}")
+            return []
+
+    def get_api_usage_stats(self) -> Dict:
+        """Get API usage statistics and recommendations"""
+        stats = self.get_stats()
+
+        api_stats = {
+            'total_requests': stats.get('total_requests', 0),
+            'successful_requests': stats.get('successful_requests', 0),
+            'failed_requests': stats.get('failed_requests', 0),
+            'success_rate': stats.get('success_rate', 0),
+            'rate_limit_delays': getattr(self, 'rate_limit_delays', 0),
+            'tier': 'FREE',
+            'recommendations': []
+        }
+
+        # Add recommendations based on usage
+        if api_stats['total_requests'] > 100:
+            api_stats['recommendations'].append("Consider upgrading to paid tier for higher rate limits")
+
+        if api_stats['success_rate'] < 0.8:
+            api_stats['recommendations'].append("Review API usage patterns - many requests failing")
+
+        if api_stats['failed_requests'] > 50:
+            api_stats['recommendations'].append("Check API key and endpoint availability")
+
+        return api_stats

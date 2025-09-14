@@ -291,7 +291,7 @@ class DataType:
 
 
 class StorageNamespace:
-    """Centralized namespace management for consistent storage keys"""
+    """Centralized namespace management for consistent storage keys with exploratory support"""
 
     @staticmethod
     def tick_key(symbol: str, date: str) -> str:
@@ -317,3 +317,227 @@ class StorageNamespace:
     def metadata_key(symbol: str, data_type: str) -> str:
         """Generate metadata storage key"""
         return f"metadata/{data_type}/{symbol}"
+
+    # ===========================================
+    # DYNAMIC ROUTING FOR EXPLORATORY RESEARCH
+    # ===========================================
+
+    @staticmethod
+    def dynamic_key(symbol_info, data_type: str, date: str) -> str:
+        """
+        Generate dynamic storage key based on parsed symbol information.
+        Perfect for exploratory research with ANY symbol.
+
+        Args:
+            symbol_info: SymbolInfo object from DTNSymbolParser
+            data_type: Type of data being stored
+            date: Date string (YYYY-MM-DD)
+
+        Returns:
+            Dynamic storage key based on symbol category
+        """
+        category = symbol_info.category
+        subcategory = symbol_info.subcategory
+        symbol = symbol_info.symbol
+
+        # Route based on category
+        if category == 'equity':
+            if subcategory == 'common_stock':
+                return f"equity/stocks/{symbol}/{data_type}/{date}"
+            elif subcategory == 'etf':
+                return f"equity/etfs/{symbol}/{data_type}/{date}"
+            elif subcategory == 'index':
+                return f"equity/indices/{symbol}/{data_type}/{date}"
+            else:
+                return f"equity/{subcategory}/{symbol}/{data_type}/{date}"
+
+        elif category == 'dtn_calculated':
+            # Use subcategory for DTN organization
+            return f"dtn/{subcategory}/{symbol}/{data_type}/{date}"
+
+        elif category == 'options':
+            underlying = symbol_info.underlying or 'unknown'
+            return f"options/{underlying}/{symbol}/{data_type}/{date}"
+
+        elif category == 'futures':
+            underlying = symbol_info.underlying or 'unknown'
+            return f"futures/{underlying}/{symbol}/{data_type}/{date}"
+
+        elif category == 'forex':
+            base_currency = symbol_info.metadata.get('base_currency', symbol[:3]) if symbol_info.metadata else symbol[:3]
+            return f"forex/{base_currency}/{symbol}/{data_type}/{date}"
+
+        else:
+            # Unknown category
+            return f"unknown/{category}/{symbol}/{data_type}/{date}"
+
+    @staticmethod
+    def dynamic_library_name(symbol_info) -> str:
+        """
+        Generate dynamic library name for ArcticDB based on symbol category.
+
+        Args:
+            symbol_info: SymbolInfo object from DTNSymbolParser
+
+        Returns:
+            Library name for ArcticDB storage
+        """
+        category = symbol_info.category
+        subcategory = symbol_info.subcategory
+
+        # Create hierarchical library names
+        if category == 'equity':
+            return f"iqfeed_equity_{subcategory}"
+
+        elif category == 'dtn_calculated':
+            # Group DTN indicators by category from PDF
+            category_group = symbol_info.metadata.get('category_group', 'general') if symbol_info.metadata else 'general'
+            return f"iqfeed_dtn_{category_group}"
+
+        elif category == 'options':
+            underlying = symbol_info.underlying or 'general'
+            return f"iqfeed_options_{underlying.lower()}"
+
+        elif category == 'futures':
+            underlying = symbol_info.underlying or 'general'
+            return f"iqfeed_futures_{underlying.lower()}"
+
+        elif category == 'forex':
+            return f"iqfeed_forex"
+
+        else:
+            return f"iqfeed_unknown_{category}"
+
+    @staticmethod
+    def iqfeed_key(data_type: str, symbol: str, date: str) -> str:
+        """Generate IQFeed-specific storage key (legacy compatibility)"""
+        return f"iqfeed/{data_type}/{symbol}/{date}"
+
+    @staticmethod
+    def polygon_key(data_type: str, symbol: str, date: str) -> str:
+        """Generate Polygon-specific storage key"""
+        return f"polygon/{data_type}/{symbol}/{date}"
+
+    @staticmethod
+    def get_namespace_hierarchy(symbol_info) -> Dict[str, str]:
+        """
+        Get complete namespace hierarchy for a symbol.
+
+        Args:
+            symbol_info: SymbolInfo object
+
+        Returns:
+            Dictionary with namespace components
+        """
+        return {
+            'data_source': 'iqfeed',
+            'category': symbol_info.category,
+            'subcategory': symbol_info.subcategory,
+            'symbol': symbol_info.symbol,
+            'library_name': StorageNamespace.dynamic_library_name(symbol_info),
+            'base_namespace': symbol_info.storage_namespace,
+            'exchange': symbol_info.exchange,
+            'underlying': symbol_info.underlying
+        }
+
+    @staticmethod
+    def categorize_storage_keys(keys: List[str]) -> Dict[str, List[str]]:
+        """
+        Categorize a list of storage keys by their namespace.
+
+        Args:
+            keys: List of storage keys
+
+        Returns:
+            Dictionary mapping categories to their keys
+        """
+        categorized = {
+            'equity': [],
+            'dtn_calculated': [],
+            'options': [],
+            'futures': [],
+            'forex': [],
+            'unknown': []
+        }
+
+        for key in keys:
+            parts = key.split('/')
+            if len(parts) > 0:
+                category = parts[0]
+                if category in categorized:
+                    categorized[category].append(key)
+                else:
+                    categorized['unknown'].append(key)
+
+        return categorized
+
+    @staticmethod
+    def suggest_related_keys(symbol_info, existing_keys: List[str]) -> List[str]:
+        """
+        Suggest related storage keys based on symbol information.
+
+        Args:
+            symbol_info: SymbolInfo object
+            existing_keys: List of existing keys in storage
+
+        Returns:
+            List of suggested related keys
+        """
+        suggestions = []
+
+        # Find keys with same underlying (for options/futures)
+        if symbol_info.underlying:
+            underlying = symbol_info.underlying
+            for key in existing_keys:
+                if underlying in key and key not in suggestions:
+                    suggestions.append(key)
+
+        # Find keys in same category
+        category = symbol_info.category
+        for key in existing_keys:
+            if key.startswith(category) and key not in suggestions:
+                suggestions.append(key)
+
+        # Find keys with same exchange
+        if symbol_info.exchange:
+            exchange = symbol_info.exchange.lower()
+            for key in existing_keys:
+                if exchange in key.lower() and key not in suggestions:
+                    suggestions.append(key)
+
+        return suggestions[:10]  # Return top 10 suggestions
+
+    @staticmethod
+    def validate_storage_key(key: str) -> bool:
+        """
+        Validate storage key format.
+
+        Args:
+            key: Storage key to validate
+
+        Returns:
+            True if key format is valid
+        """
+        try:
+            parts = key.split('/')
+            return len(parts) >= 3 and all(part for part in parts)
+        except:
+            return False
+
+    @staticmethod
+    def normalize_symbol_for_storage(symbol: str) -> str:
+        """
+        Normalize symbol for storage key usage.
+
+        Args:
+            symbol: Raw symbol
+
+        Returns:
+            Normalized symbol safe for storage keys
+        """
+        # Replace problematic characters for storage systems
+        normalized = symbol.replace('/', '_').replace('\\', '_').replace(':', '_').replace('?', '_')
+        normalized = normalized.replace('*', '_').replace('<', '_').replace('>', '_').replace('|', '_')
+        normalized = normalized.replace('"', '_').replace(' ', '_')
+
+        return normalized.upper()
