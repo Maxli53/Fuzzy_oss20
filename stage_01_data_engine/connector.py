@@ -77,6 +77,22 @@ class IQFeedConnector:
         self.is_connected = False
         logger.info("Disconnected from IQFeed")
 
+    def get_lookup_connection(self) -> Optional[iq.LookupConn]:
+        """Get lookup connection for DTN symbol lookups"""
+        if not self.is_connected:
+            logger.error("Not connected to IQFeed. Call connect() first.")
+            return None
+
+        try:
+            logger.info("Creating lookup connection...")
+            lookup_conn = iq.LookupConn(name="fuzzy-oss20-lookup")
+            logger.info("Lookup connection created successfully")
+            return lookup_conn
+
+        except Exception as e:
+            logger.error(f"Failed to create lookup connection: {e}")
+            return None
+
     def test_connection(self) -> bool:
         """Test if connection is working"""
         if not self.is_connected:
