@@ -14,7 +14,12 @@
       "Bash(git push:*)",
       "WebFetch(domain:github.com)",
       "WebFetch(domain:raw.githubusercontent.com)",
-      "Bash(mkdir:*)"
+      "Bash(mkdir:*)",
+      "Bash(streamlit run:*)",
+      "Bash(tasklist)",
+      "Bash(findstr:*)",
+      "Read(//c/Users/maxli/PytharmProjects/PythonProject/**)",
+      "Bash(tasklist:*)"
     ],
     "deny": [],
     "ask": []

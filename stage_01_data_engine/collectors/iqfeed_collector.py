@@ -11,7 +11,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
 
 import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time as dt_time
 from typing import Dict, List, Optional, Union
 import logging
 import time
@@ -97,6 +97,9 @@ class IQFeedCollector(BaseCollector):
         Args:
             symbols: Stock symbols to collect
             lookback_days: Number of days to look back
+            market_hours_only: Filter to regular market hours (09:30-16:00) default True
+            include_premarket: Include pre-market hours (04:00-09:30) default False
+            include_afterhours: Include after-hours (16:00-20:00) default False
 
         Returns:
             DataFrame with tick data (timestamp, symbol, price, volume)
@@ -107,6 +110,33 @@ class IQFeedCollector(BaseCollector):
         if not self.connector.connect():
             logger.error("Failed to connect to IQFeed")
             return None
+
+        # Market hours filtering parameters
+        market_hours_only = kwargs.get('market_hours_only', True)
+        include_premarket = kwargs.get('include_premarket', False)
+        include_afterhours = kwargs.get('include_afterhours', False)
+
+        # Define time filters based on market hours preferences
+        if market_hours_only and not include_premarket and not include_afterhours:
+            # Regular market hours only (09:30-16:00)
+            bgn_time = dt_time(9, 30)
+            end_time = dt_time(16, 0)
+        elif include_premarket and include_afterhours:
+            # Extended hours (04:00-20:00)
+            bgn_time = dt_time(4, 0)
+            end_time = dt_time(20, 0)
+        elif include_premarket:
+            # Pre-market + regular (04:00-16:00)
+            bgn_time = dt_time(4, 0)
+            end_time = dt_time(16, 0)
+        elif include_afterhours:
+            # Regular + after-hours (09:30-20:00)
+            bgn_time = dt_time(9, 30)
+            end_time = dt_time(20, 0)
+        else:
+            # No time filter
+            bgn_time = None
+            end_time = None
 
         all_ticks = []
 
@@ -121,11 +151,28 @@ class IQFeedCollector(BaseCollector):
                     try:
                         logger.info(f"Collecting tick data for {symbol}")
 
-                        # Get most recent tick data (like IQFeed terminal)
-                        tick_data = hist_conn.request_ticks(
-                            ticker=symbol,
-                            max_ticks=kwargs.get('max_ticks', 1000)
-                        )
+                        # Try historical data with time filtering first
+                        tick_data = None
+                        if lookback_days > 0 and (bgn_time or end_time):
+                            try:
+                                # Historical data with time filtering
+                                tick_data = hist_conn.request_ticks_for_days(
+                                    ticker=symbol,
+                                    num_days=lookback_days,
+                                    bgn_flt=bgn_time,
+                                    end_flt=end_time,
+                                    max_ticks=kwargs.get('max_ticks', 10000)
+                                )
+                            except Exception as e:
+                                logger.warning(f"Historical tick request failed: {e}")
+
+                        # Fallback to most recent ticks if historical fails
+                        if tick_data is None or len(tick_data) == 0:
+                            logger.info(f"Using most recent ticks for {symbol}")
+                            tick_data = hist_conn.request_ticks(
+                                ticker=symbol,
+                                max_ticks=kwargs.get('max_ticks', 1000)
+                            )
 
                         if tick_data is not None and len(tick_data) > 0:
                             for tick in tick_data:
@@ -157,7 +204,13 @@ class IQFeedCollector(BaseCollector):
                                         'ask': float(tick['ask']),
                                         'tick_id': int(tick['tick_id']),
                                         'market_center': int(tick['mkt_ctr']),
-                                        'total_volume': int(tick['tot_vlm'])
+                                        'total_volume': int(tick['tot_vlm']),
+                                        # Trade condition fields
+                                        'last_type': tick['last_type'].decode() if hasattr(tick['last_type'], 'decode') else str(tick['last_type']),
+                                        'cond1': int(tick['cond1']),
+                                        'cond2': int(tick['cond2']),
+                                        'cond3': int(tick['cond3']),
+                                        'cond4': int(tick['cond4'])
                                     }
                                     all_ticks.append(tick_record)
 
@@ -187,47 +240,76 @@ class IQFeedCollector(BaseCollector):
         df = pd.DataFrame(all_ticks)
         return df.sort_values('timestamp').reset_index(drop=True)
 
-    def collect_bars(self, symbols: Union[str, List[str]], bar_type: str = '5s', lookback_days: int = 1, **kwargs) -> Optional[pd.DataFrame]:
+    def collect_bars(self, symbols: Union[str, List[str]], bar_type: str = '1m', lookback_days: int = 1, **kwargs) -> Optional[pd.DataFrame]:
         """
-        Collect or construct bars for symbols.
+        Collect or construct bars for symbols with advanced bar type support.
 
         Args:
             symbols: Stock symbols to collect
-            bar_type: '5s', '1m', '5m', 'tick_50', etc.
-            lookback_days: Number of days to look back
+            bar_type: Bar type selection:
+                - Time-based: 'ticks', '1s', '5s', '1m', '5m', '15m', '1h', '1d'
+                - Advanced: 'tick_N', 'volume_N', 'dollar_N', 'imbalance', 'volatility', 'range', 'renko'
+            lookback_days: Number of trading days to look back
+            **kwargs: Bar-specific parameters:
+                - tick_threshold: N ticks for tick bars (default 50)
+                - volume_threshold: N shares for volume bars (default 1000)
+                - dollar_threshold: $N for dollar bars (default 10000)
+                - imbalance_threshold: % imbalance for imbalance bars (default 0.2)
+                - volatility_threshold: volatility accumulation threshold
+                - range_threshold: price range in points (default 1.0)
+                - renko_brick_size: brick size in points (default 0.5)
 
         Returns:
-            DataFrame with OHLCV bars
+            DataFrame with OHLCV bars and bar-specific metadata
         """
-        if bar_type in ['tick_50']:
-            # For tick-based bars, first collect ticks then construct
-            tick_data = self.collect_ticks(symbols, lookback_days)
-            if tick_data is None:
-                return None
+        # Parse bar type and parameters
+        if bar_type.startswith('tick_'):
+            # Tick-based bars: tick_50, tick_100, etc.
+            tick_threshold = kwargs.get('tick_threshold', int(bar_type.split('_')[1]) if '_' in bar_type else 50)
+            return self._construct_tick_bars(symbols, tick_threshold, lookback_days, **kwargs)
 
-            # Use BarBuilder to construct tick bars
-            all_bars = []
-            for symbol in (symbols if isinstance(symbols, list) else [symbols]):
-                symbol_ticks = tick_data[tick_data['symbol'] == symbol]
-                if not symbol_ticks.empty:
-                    tick_bars = BarBuilder.tick_bars(symbol_ticks, n=50)
-                    if not tick_bars.empty:
-                        tick_bars['symbol'] = symbol
-                        all_bars.append(tick_bars)
+        elif bar_type.startswith('volume_'):
+            # Volume-based bars: volume_1000, volume_5000, etc.
+            volume_threshold = kwargs.get('volume_threshold', int(bar_type.split('_')[1]) if '_' in bar_type else 1000)
+            return self._construct_volume_bars(symbols, volume_threshold, lookback_days, **kwargs)
 
-            if all_bars:
-                return pd.concat(all_bars, ignore_index=True)
-            return None
+        elif bar_type.startswith('dollar_'):
+            # Dollar-based bars: dollar_10000, dollar_50000, etc.
+            dollar_threshold = kwargs.get('dollar_threshold', int(bar_type.split('_')[1]) if '_' in bar_type else 10000)
+            return self._construct_dollar_bars(symbols, dollar_threshold, lookback_days, **kwargs)
 
-        elif bar_type in ['5s', '1m', '5m', '15m', '1h', '1d']:
-            # For time-based bars, get from IQFeed directly
-            return self._collect_time_bars(symbols, bar_type, lookback_days)
+        elif bar_type == 'imbalance':
+            # Imbalance bars
+            imbalance_threshold = kwargs.get('imbalance_threshold', 0.2)
+            return self._construct_imbalance_bars(symbols, imbalance_threshold, lookback_days, **kwargs)
+
+        elif bar_type == 'volatility':
+            # Volatility bars
+            volatility_threshold = kwargs.get('volatility_threshold', 0.02)
+            return self._construct_volatility_bars(symbols, volatility_threshold, lookback_days, **kwargs)
+
+        elif bar_type == 'range':
+            # Range bars
+            range_threshold = kwargs.get('range_threshold', 1.0)
+            return self._construct_range_bars(symbols, range_threshold, lookback_days, **kwargs)
+
+        elif bar_type == 'renko':
+            # Renko bars
+            renko_brick_size = kwargs.get('renko_brick_size', 0.5)
+            return self._construct_renko_bars(symbols, renko_brick_size, lookback_days, **kwargs)
+
+        elif bar_type in ['ticks', '1s', '5s', '1m', '5m', '15m', '1h', '1d']:
+            # Time-based bars from IQFeed directly
+            if bar_type == 'ticks':
+                return self.collect_ticks(symbols, lookback_days, **kwargs)
+            else:
+                return self._collect_time_bars(symbols, bar_type, lookback_days, **kwargs)
 
         else:
             logger.error(f"Unsupported bar type: {bar_type}")
             return None
 
-    def _collect_time_bars(self, symbols: Union[str, List[str]], bar_type: str, lookback_days: int) -> Optional[pd.DataFrame]:
+    def _collect_time_bars(self, symbols: Union[str, List[str]], bar_type: str, lookback_days: int, **kwargs) -> Optional[pd.DataFrame]:
         """Collect time-based bars directly from IQFeed"""
         if isinstance(symbols, str):
             symbols = [symbols]
@@ -333,6 +415,136 @@ class IQFeedCollector(BaseCollector):
 
         df = pd.DataFrame(all_bars)
         return df.sort_values(['symbol', 'timestamp']).reset_index(drop=True)
+
+    # ===========================================
+    # ADVANCED BAR TYPE CONSTRUCTORS
+    # ===========================================
+
+    def _construct_tick_bars(self, symbols: Union[str, List[str]], tick_threshold: int, lookback_days: int, **kwargs) -> Optional[pd.DataFrame]:
+        """Construct tick-based bars (every N ticks)"""
+        tick_data = self.collect_ticks(symbols, lookback_days, **kwargs)
+        if tick_data is None:
+            return None
+
+        all_bars = []
+        for symbol in (symbols if isinstance(symbols, list) else [symbols]):
+            symbol_ticks = tick_data[tick_data['symbol'] == symbol]
+            if not symbol_ticks.empty:
+                tick_bars = BarBuilder.tick_bars(symbol_ticks, n=tick_threshold)
+                if not tick_bars.empty:
+                    tick_bars['symbol'] = symbol
+                    tick_bars['bar_type'] = f'tick_{tick_threshold}'
+                    all_bars.append(tick_bars)
+
+        return pd.concat(all_bars, ignore_index=True) if all_bars else None
+
+    def _construct_volume_bars(self, symbols: Union[str, List[str]], volume_threshold: int, lookback_days: int, **kwargs) -> Optional[pd.DataFrame]:
+        """Construct volume-based bars (every N shares)"""
+        tick_data = self.collect_ticks(symbols, lookback_days, **kwargs)
+        if tick_data is None:
+            return None
+
+        all_bars = []
+        for symbol in (symbols if isinstance(symbols, list) else [symbols]):
+            symbol_ticks = tick_data[tick_data['symbol'] == symbol]
+            if not symbol_ticks.empty:
+                volume_bars = BarBuilder.volume_bars(symbol_ticks, volume_threshold=volume_threshold)
+                if not volume_bars.empty:
+                    volume_bars['symbol'] = symbol
+                    volume_bars['bar_type'] = f'volume_{volume_threshold}'
+                    all_bars.append(volume_bars)
+
+        return pd.concat(all_bars, ignore_index=True) if all_bars else None
+
+    def _construct_dollar_bars(self, symbols: Union[str, List[str]], dollar_threshold: int, lookback_days: int, **kwargs) -> Optional[pd.DataFrame]:
+        """Construct dollar-based bars (every $N traded)"""
+        tick_data = self.collect_ticks(symbols, lookback_days, **kwargs)
+        if tick_data is None:
+            return None
+
+        all_bars = []
+        for symbol in (symbols if isinstance(symbols, list) else [symbols]):
+            symbol_ticks = tick_data[tick_data['symbol'] == symbol]
+            if not symbol_ticks.empty:
+                dollar_bars = BarBuilder.dollar_bars(symbol_ticks, dollar_threshold=dollar_threshold)
+                if not dollar_bars.empty:
+                    dollar_bars['symbol'] = symbol
+                    dollar_bars['bar_type'] = f'dollar_{dollar_threshold}'
+                    all_bars.append(dollar_bars)
+
+        return pd.concat(all_bars, ignore_index=True) if all_bars else None
+
+    def _construct_imbalance_bars(self, symbols: Union[str, List[str]], imbalance_threshold: float, lookback_days: int, **kwargs) -> Optional[pd.DataFrame]:
+        """Construct imbalance-based bars"""
+        tick_data = self.collect_ticks(symbols, lookback_days, **kwargs)
+        if tick_data is None:
+            return None
+
+        all_bars = []
+        for symbol in (symbols if isinstance(symbols, list) else [symbols]):
+            symbol_ticks = tick_data[tick_data['symbol'] == symbol]
+            if not symbol_ticks.empty:
+                imbalance_bars = BarBuilder.imbalance_bars(symbol_ticks, threshold=imbalance_threshold)
+                if not imbalance_bars.empty:
+                    imbalance_bars['symbol'] = symbol
+                    imbalance_bars['bar_type'] = 'imbalance'
+                    all_bars.append(imbalance_bars)
+
+        return pd.concat(all_bars, ignore_index=True) if all_bars else None
+
+    def _construct_volatility_bars(self, symbols: Union[str, List[str]], volatility_threshold: float, lookback_days: int, **kwargs) -> Optional[pd.DataFrame]:
+        """Construct volatility-based bars"""
+        tick_data = self.collect_ticks(symbols, lookback_days, **kwargs)
+        if tick_data is None:
+            return None
+
+        all_bars = []
+        for symbol in (symbols if isinstance(symbols, list) else [symbols]):
+            symbol_ticks = tick_data[tick_data['symbol'] == symbol]
+            if not symbol_ticks.empty:
+                volatility_bars = BarBuilder.volatility_bars(symbol_ticks, threshold=volatility_threshold)
+                if not volatility_bars.empty:
+                    volatility_bars['symbol'] = symbol
+                    volatility_bars['bar_type'] = 'volatility'
+                    all_bars.append(volatility_bars)
+
+        return pd.concat(all_bars, ignore_index=True) if all_bars else None
+
+    def _construct_range_bars(self, symbols: Union[str, List[str]], range_threshold: float, lookback_days: int, **kwargs) -> Optional[pd.DataFrame]:
+        """Construct range-based bars"""
+        tick_data = self.collect_ticks(symbols, lookback_days, **kwargs)
+        if tick_data is None:
+            return None
+
+        all_bars = []
+        for symbol in (symbols if isinstance(symbols, list) else [symbols]):
+            symbol_ticks = tick_data[tick_data['symbol'] == symbol]
+            if not symbol_ticks.empty:
+                range_bars = BarBuilder.range_bars(symbol_ticks, range_threshold=range_threshold)
+                if not range_bars.empty:
+                    range_bars['symbol'] = symbol
+                    range_bars['bar_type'] = 'range'
+                    all_bars.append(range_bars)
+
+        return pd.concat(all_bars, ignore_index=True) if all_bars else None
+
+    def _construct_renko_bars(self, symbols: Union[str, List[str]], renko_brick_size: float, lookback_days: int, **kwargs) -> Optional[pd.DataFrame]:
+        """Construct renko-based bars"""
+        tick_data = self.collect_ticks(symbols, lookback_days, **kwargs)
+        if tick_data is None:
+            return None
+
+        all_bars = []
+        for symbol in (symbols if isinstance(symbols, list) else [symbols]):
+            symbol_ticks = tick_data[tick_data['symbol'] == symbol]
+            if not symbol_ticks.empty:
+                renko_bars = BarBuilder.renko_bars(symbol_ticks, brick_size=renko_brick_size)
+                if not renko_bars.empty:
+                    renko_bars['symbol'] = symbol
+                    renko_bars['bar_type'] = 'renko'
+                    all_bars.append(renko_bars)
+
+        return pd.concat(all_bars, ignore_index=True) if all_bars else None
 
     # ===========================================
     # DTN CALCULATED INDICATORS

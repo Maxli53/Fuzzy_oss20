@@ -1,11 +1,32 @@
 # Fuzzy OSS20 Data Policy
 
-## Base Data Strategy
+## User-Controlled Data Collection Workflow
 
-### Primary Data Collection
-- **50-tick bars**: Main data unit for tick-based analysis
-- **5-second bars**: Main data unit for time-based analysis
-- **NO raw ticks**: We aggregate immediately to prevent storage bloat
+### Step 1: Trading Days Selection
+- User specifies number of trading days to download
+- Respects market hours policy (8 days max during market, 180 days after close)
+
+### Step 2: Bar Type Selection
+**Time-Based Bars**: ticks, 1s, 5s, 1m, 5m, 15m, 1h, daily
+**Advanced Bars**: tick_N, volume_N, dollar_N, imbalance, volatility, range, renko
+
+### Step 3: Frequency/Threshold Selection
+- **Time bars**: interval selection (1m, 5m, etc.)
+- **Tick bars**: N ticks (10, 50, 100, 200, 500, 1000)
+- **Volume bars**: N shares (1K, 5K, 10K, 50K, 100K)
+- **Dollar bars**: $N amount ($1K, $10K, $50K, $100K, $500K, $1M)
+- **Imbalance bars**: imbalance threshold (10%, 20%, 30%)
+- **Volatility bars**: volatility accumulation threshold
+- **Range bars**: price movement points (0.1, 0.5, 1.0, 2.0)
+- **Renko bars**: brick size (0.1, 0.25, 0.5, 1.0)
+
+### Step 4: Market Hours (Default)
+- **Default**: Regular hours only (09:30-16:00 ET)
+- **Optional**: Include pre-market (04:00-09:30 ET)
+- **Optional**: Include after-hours (16:00-20:00 ET)
+- **Advanced**: Custom time range selection
+
+### Data Quality Standards
 - **NO fallbacks**: If primary data unavailable, we wait/retry, never substitute
 
 ### Historical Data Limits
@@ -278,4 +299,153 @@ POLYGON_API_KEY=lXc6yVaITFsV9S1pZ8L9u30yMbiV5VOi
 - **Fail fast and retry rather than degrade quality**
 - **Alert immediately on data source failures**
 
-This policy ensures hedge fund-grade data quality with clear separation of concerns and professional data handling standards.
+## Exploratory Quantitative Research Mode
+
+### Dynamic Symbol Discovery
+The system now supports **exploratory mode** where ANY symbol can be fetched and stored without preconfiguration:
+
+```python
+# Fetch ANY symbol on the fly
+engine = DataEngine()
+data = engine.fetch_any(['AAPL', 'JTNT.Z', 'ESU24', 'EURUSD', 'UNKNOWN_TICKER'])
+
+# Explore unknown symbols before fetching
+exploration = engine.explore(['MYSTERIOUS_SYMBOL'], deep_analysis=True)
+
+# Discover new symbols from news mentions
+new_symbols = engine.discover_new_symbols(method='news')
+```
+
+### Flexible Storage Architecture
+
+#### Auto-Categorization System
+Based on DTN symbol patterns, the system automatically routes symbols to appropriate storage:
+
+```
+Flexible Arctic Storage:
+├── iqfeed_equity_stocks/          # AAPL, MSFT, TSLA
+├── iqfeed_equity_etfs/            # SPY, QQQ, XLK
+├── iqfeed_dtn_sentiment/          # JTNT.Z, RINT.Z (market sentiment)
+├── iqfeed_dtn_options/            # TCOEA.Z, VCOET.Z (options flow)
+├── iqfeed_options_aapl/           # AAPL240315C00150000
+├── iqfeed_futures_es/             # ESU24, ESZ24
+├── iqfeed_forex/                  # EURUSD, GBPJPY
+└── iqfeed_unknown_xyz/            # Symbols not yet categorized
+```
+
+#### Dynamic Namespace Generation
+Storage paths are generated automatically based on symbol characteristics:
+
+- **Equities**: `iqfeed/equity/stocks/AAPL/ticks/2024-01-15`
+- **DTN Indicators**: `iqfeed/dtn/sentiment/JTNT.Z/indicators/2024-01-15`
+- **Options**: `iqfeed/options/AAPL/AAPL240315C00150000/quotes/2024-01-15`
+- **Futures**: `iqfeed/futures/ES/ESU24/ticks/2024-01-15`
+- **Forex**: `iqfeed/forex/EUR/EURUSD/ticks/2024-01-15`
+
+### Symbol Discovery Pipeline
+
+#### 1. Pattern Recognition
+Uses DTN Calculated Indicators PDF patterns to identify:
+- **DTN Indicators** (.Z suffix): JTNT.Z → NYSE Net Tick
+- **Options** (OCC format): AAPL240315C00150000 → AAPL Call $150 exp 3/15/24
+- **Futures** (Month codes): ESU24 → E-mini S&P Sept 2024
+- **Forex** (Currency pairs): EURUSD → Euro/Dollar
+
+#### 2. Smart Storage Routing
+Automatically determines:
+- **Library name**: Based on category and subcategory
+- **Namespace**: Hierarchical path for organization
+- **Metadata**: Exchange, expiration, strike price, etc.
+- **Retention policy**: Based on data type and importance
+
+#### 3. Universe Management
+Tracks discovered symbols for research expansion:
+- **Symbol registry**: All discovered symbols with metadata
+- **Access patterns**: Most frequently accessed data
+- **Related symbols**: Suggestions based on analysis
+- **Universe statistics**: Diversity and coverage metrics
+
+### Data Quality in Exploratory Mode
+
+#### Validation Without Preconfiguration
+- **Pattern-based validation**: Use symbol type to determine expected data ranges
+- **Statistical outlier detection**: 3-sigma rule across all data types
+- **Cross-validation**: Check related symbols for consistency
+- **Graceful degradation**: Store with quality flags if uncertain
+
+#### Metadata Enrichment
+Every stored symbol includes comprehensive metadata:
+```yaml
+symbol_metadata:
+  symbol: "AAPL"
+  category: "equity"
+  subcategory: "common_stock"
+  exchange: "NASDAQ"
+  storage_namespace: "iqfeed/equity/stocks"
+  discovery_timestamp: "2024-01-15T10:30:00Z"
+  access_count: 42
+  related_symbols: ["MSFT", "GOOGL", "QQQ"]
+  data_quality_score: 0.95
+```
+
+### Research Workflow Integration
+
+#### Exploratory Research Pattern
+```python
+# 1. Discover interesting symbols
+engine = DataEngine()
+news_symbols = engine.discover_new_symbols(method='news')
+
+# 2. Explore before committing resources
+for symbol in news_symbols:
+    exploration = engine.explore([symbol])
+    if exploration[symbol]['sample_data_info']['data_quality'] == 'GOOD':
+        # 3. Fetch comprehensive data
+        data = engine.fetch_any([symbol], lookback_days=30, include_news=True)
+
+        # 4. Data is automatically stored with smart routing
+        # No manual storage configuration needed
+```
+
+#### Universe Evolution
+The system learns and adapts:
+- **Symbol frequency tracking**: Popular symbols get priority
+- **Category expansion**: New categories discovered automatically
+- **Storage optimization**: Frequently accessed data gets better indexing
+- **Research suggestions**: Related symbols recommended based on patterns
+
+### Performance & Scalability
+
+#### Lazy Library Creation
+- Libraries created only when first symbol stored
+- No wasted storage for unused categories
+- Automatic cleanup of empty libraries
+
+#### Intelligent Caching
+- Symbol metadata cached for fast access
+- Access patterns tracked for optimization
+- Related symbol suggestions precomputed
+
+#### Resource Management
+```yaml
+limits:
+  max_libraries: 1000
+  max_symbols_per_library: 10000
+  storage_alert_threshold: 10GB
+  query_timeout: 30s
+```
+
+### Migration from Rigid to Flexible
+
+#### Backwards Compatibility
+- Existing data accessible through legacy methods
+- Gradual migration without data loss
+- Dual storage support during transition
+
+#### Migration Strategy
+1. **Phase 1**: Deploy flexible storage alongside existing
+2. **Phase 2**: Route new symbols to flexible storage
+3. **Phase 3**: Migrate existing symbols with metadata enrichment
+4. **Phase 4**: Retire rigid storage components
+
+This policy ensures hedge fund-grade data quality with clear separation of concerns and professional data handling standards, while enabling true exploratory quantitative research capabilities.

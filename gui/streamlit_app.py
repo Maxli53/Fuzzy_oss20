@@ -203,9 +203,19 @@ def live_data_testing_tab(data_interface):
         with col1:
             data_type = st.selectbox(
                 "Data Type:",
-                options=['ticks', 'bars', 'quotes'],
-                index=0,
-                help="Type of market data to fetch"
+                options=[
+                    # Time-based
+                    'ticks', '1s', '5s', '1m', '5m', '15m', '1h', 'daily',
+                    # Advanced bars
+                    'tick_50', 'tick_100', 'tick_200',
+                    'volume_1000', 'volume_5000', 'volume_10000',
+                    'dollar_10000', 'dollar_50000', 'dollar_100000',
+                    'imbalance', 'volatility', 'range', 'renko',
+                    # Legacy
+                    'bars', 'quotes'
+                ],
+                index=3,  # Default to '1m'
+                help="Complete bar type selection including advanced types"
             )
 
         with col2:
@@ -225,6 +235,17 @@ def live_data_testing_tab(data_interface):
                 value=1000,
                 help="Maximum records to fetch"
             )
+
+    # Market hours controls
+    with st.expander("🕐 Market Hours Control"):
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            market_hours_only = st.checkbox("Market Hours Only (09:30-16:00)", value=True)
+        with col2:
+            include_premarket = st.checkbox("Include Pre-market (04:00-09:30)", value=False)
+        with col3:
+            include_afterhours = st.checkbox("Include After-hours (16:00-20:00)", value=False)
 
     if fetch_button and live_symbol:
         st.divider()
@@ -246,12 +267,43 @@ def live_data_testing_tab(data_interface):
         # Step 2: Fetch real data
         st.subheader(f"Step 2: Fetching Real Data for {symbol}")
         with st.spinner(f"Fetching {data_type} data from market sources..."):
-            fetch_result = data_interface.fetch_real_data(
-                symbol=symbol,
-                data_type=data_type,
-                lookback_days=lookback_days,
-                max_records=max_records
-            )
+            # Handle advanced bar types through direct collector access
+            if data_type in ['ticks', 'bars', 'quotes']:
+                # Use existing interface for basic types
+                fetch_result = data_interface.fetch_real_data(
+                    symbol=symbol,
+                    data_type=data_type,
+                    lookback_days=lookback_days,
+                    max_records=max_records
+                )
+            else:
+                # Use collector directly for advanced bar types
+                try:
+                    collector_data = data_interface.data_engine.iqfeed_collector.collect_bars(
+                        symbols=[symbol],
+                        bar_type=data_type,
+                        lookback_days=lookback_days,
+                        market_hours_only=market_hours_only,
+                        include_premarket=include_premarket,
+                        include_afterhours=include_afterhours,
+                        max_ticks=max_records
+                    )
+
+                    if collector_data is not None and not collector_data.empty:
+                        fetch_result = {
+                            'success': True,
+                            'data': collector_data,
+                            'source': 'IQFeed',
+                            'metadata': {
+                                'records_count': len(collector_data),
+                                'date_range': f"{collector_data['timestamp'].min()} to {collector_data['timestamp'].max()}"
+                            }
+                        }
+                    else:
+                        fetch_result = {'success': False, 'error': 'No data returned from collector'}
+
+                except Exception as e:
+                    fetch_result = {'success': False, 'error': f'Collector error: {str(e)}'}
 
         if fetch_result['success']:
             data = fetch_result['data']
