@@ -1,12 +1,12 @@
 """
 Collectors Module - Data Collection Components
-Organized by data source and type for clean separation of concerns
+Organized by data source for clear separation of concerns
 """
 
-from .tick_collector import TickCollector
-from .dtn_indicators_collector import DTNIndicatorCollector
+from .iqfeed_collector import IQFeedCollector
+from .polygon_collector import PolygonCollector
 
 __all__ = [
-    'TickCollector',
-    'DTNIndicatorCollector'
+    'IQFeedCollector',
+    'PolygonCollector'
 ]
