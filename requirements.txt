@@ -10,6 +10,7 @@ pandas>=2.0.0
 numpy>=1.24.0
 scikit-learn>=1.3.0
 scipy>=1.10.0
+pydantic>=2.0.0  # Data validation and settings management
 
 # Financial Data APIs
 polygon-api-client>=1.9.0
