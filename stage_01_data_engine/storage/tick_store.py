@@ -185,6 +185,106 @@ class TickStore:
             logger.error(f"Error storing ticks for {symbol} on {date}: {e}")
             return False
 
+    def store_numpy_ticks(self,
+                         symbol: str,
+                         date: str,
+                         tick_array: np.ndarray,
+                         metadata: Optional[Dict[str, Any]] = None,
+                         overwrite: bool = False) -> bool:
+        """
+        Store raw NumPy tick array from IQFeed.
+        Converts NumPy structured array to DataFrame with proper timestamp.
+
+        Args:
+            symbol: Stock symbol (e.g., 'AAPL')
+            date: Date string (YYYY-MM-DD)
+            tick_array: NumPy structured array from IQFeedCollector
+            metadata: Additional metadata dict
+            overwrite: Whether to overwrite existing data
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            if tick_array is None or len(tick_array) == 0:
+                logger.warning(f"Empty tick array for {symbol} on {date}")
+                return False
+
+            # Convert NumPy structured array to DataFrame
+            tick_df = self._numpy_ticks_to_dataframe(tick_array)
+
+            # Use existing store_ticks method
+            return self.store_ticks(symbol, date, tick_df, metadata, overwrite)
+
+        except Exception as e:
+            logger.error(f"Error storing NumPy ticks for {symbol}: {e}")
+            return False
+
+    def _numpy_ticks_to_dataframe(self, tick_array: np.ndarray) -> pd.DataFrame:
+        """
+        Convert IQFeed NumPy tick array to DataFrame with proper timestamp.
+
+        IQFeed tick array fields (from pyiqfeed):
+        - tick_id: Request ID
+        - date: Date (datetime64[D])
+        - time: Microseconds since midnight ET (timedelta64[us])
+        - last: Trade price
+        - last_sz: Trade size
+        - last_type: Exchange code (bytes)
+        - mkt_ctr: Market center ID
+        - tot_vlm: Total cumulative volume
+        - bid: Bid price
+        - ask: Ask price
+        - cond1-4: Trade condition codes
+        """
+        # Create DataFrame preserving ALL fields from NumPy array
+        df = pd.DataFrame({
+            # Core trade data
+            'tick_id': tick_array['tick_id'].astype(int),
+            'date': tick_array['date'],
+            'time_us': tick_array['time'],  # Original microseconds since midnight
+            'price': tick_array['last'].astype(float),
+            'volume': tick_array['last_sz'].astype(int),
+
+            # Market data
+            'exchange': tick_array['last_type'],  # Exchange code
+            'market_center': tick_array['mkt_ctr'].astype(int),
+            'total_volume': tick_array['tot_vlm'].astype(int),
+
+            # Bid/Ask data
+            'bid': tick_array['bid'].astype(float),
+            'ask': tick_array['ask'].astype(float),
+
+            # Trade conditions (preserve all 4)
+            'condition_1': tick_array['cond1'].astype(int),
+            'condition_2': tick_array['cond2'].astype(int),
+            'condition_3': tick_array['cond3'].astype(int),
+            'condition_4': tick_array['cond4'].astype(int)
+        })
+
+        # Combine date and time into proper timestamp
+        df['timestamp'] = pd.to_datetime(df['date']) + pd.to_timedelta(df['time_us'])
+
+        # Keep original date and time_us for reference (useful for debugging)
+        # but drop the duplicate 'date' column
+        df = df.drop(['date'], axis=1)
+
+        # Decode exchange codes if they're bytes
+        if df['exchange'].dtype == object:
+            df['exchange'] = df['exchange'].apply(
+                lambda x: x.decode('utf-8') if isinstance(x, bytes) else str(x)
+            )
+
+        # Calculate derived fields
+        df['spread'] = df['ask'] - df['bid']  # Bid-ask spread
+        df['midpoint'] = (df['bid'] + df['ask']) / 2  # Mid price
+
+        # Sort by timestamp
+        df = df.sort_values('timestamp').reset_index(drop=True)
+
+        logger.debug(f"Converted {len(tick_array)} NumPy ticks to DataFrame with {len(df.columns)} columns")
+        return df
+
     def load_ticks(self,
                   symbol: str,
                   date_range: Union[str, Tuple[str, str]],
