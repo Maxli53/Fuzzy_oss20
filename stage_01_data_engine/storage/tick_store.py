@@ -14,6 +14,8 @@ from pathlib import Path
 import warnings
 import gc
 import time
+from functools import wraps
+from enum import Enum
 
 # ArcticDB imports
 try:
@@ -26,6 +28,79 @@ except ImportError:
 import pytz
 
 logger = logging.getLogger(__name__)
+
+
+# Custom Exception Classes
+class TickStoreError(Exception):
+    """Base exception for TickStore errors"""
+    pass
+
+
+class DataValidationError(TickStoreError):
+    """Raised when data validation fails"""
+    pass
+
+
+class StorageError(TickStoreError):
+    """Raised when storage operations fail"""
+    pass
+
+
+class ConfigurationError(TickStoreError):
+    """Raised when configuration is invalid"""
+    pass
+
+
+class ConnectionError(TickStoreError):
+    """Raised when ArcticDB connection fails"""
+    pass
+
+
+class ErrorSeverity(Enum):
+    """Error severity levels for prioritization"""
+    CRITICAL = 1  # System cannot continue
+    HIGH = 2      # Operation failed, needs attention
+    MEDIUM = 3    # Issue detected, operation continued
+    LOW = 4       # Minor issue, informational
+
+
+def retry_on_failure(max_retries: int = 3, delay: float = 1.0, backoff: float = 2.0):
+    """
+    Decorator for automatic retry with exponential backoff.
+
+    Args:
+        max_retries: Maximum number of retry attempts
+        delay: Initial delay between retries in seconds
+        backoff: Multiplier for delay after each retry
+    """
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            last_exception = None
+            current_delay = delay
+
+            for attempt in range(max_retries + 1):
+                try:
+                    return func(*args, **kwargs)
+                except (ConnectionError, StorageError) as e:
+                    last_exception = e
+                    if attempt < max_retries:
+                        logger.warning(
+                            f"{func.__name__} failed (attempt {attempt + 1}/{max_retries + 1}): {e}. "
+                            f"Retrying in {current_delay:.1f}s..."
+                        )
+                        time.sleep(current_delay)
+                        current_delay *= backoff
+                    else:
+                        logger.error(f"{func.__name__} failed after {max_retries + 1} attempts")
+                except Exception as e:
+                    # Don't retry on other exceptions
+                    raise
+
+            if last_exception:
+                raise last_exception
+        return wrapper
+    return decorator
 
 class TickStore:
     """
@@ -111,8 +186,14 @@ class TickStore:
             'write_times_ms': [],
             'validation_failures': 0,
             'versions_pruned': 0,
-            'snapshots_created': 0
+            'snapshots_created': 0,
+            'retries_attempted': 0,
+            'retries_succeeded': 0
         }
+
+        # Error tracking
+        self.error_history = []  # List of recent errors with context
+        self.max_error_history = 100  # Keep last 100 errors
 
         # Snapshot tracking
         self.last_snapshot_date = None
@@ -161,8 +242,9 @@ class TickStore:
             }
             logger.warning("Using default configuration")
 
+    @retry_on_failure(max_retries=3, delay=2.0)
     def _init_arctic(self):
-        """Initialize ArcticDB connection and libraries"""
+        """Initialize ArcticDB connection and libraries with retry logic"""
         try:
             # Ensure data directory exists
             if self.arctic_uri.startswith("lmdb://"):
@@ -177,9 +259,12 @@ class TickStore:
 
             logger.info("ArcticDB connection established successfully")
 
+        except ImportError as e:
+            self._log_error(ErrorSeverity.CRITICAL, "ArcticDB not installed", e)
+            raise ConfigurationError(f"ArcticDB not installed: {e}")
         except Exception as e:
-            logger.error(f"Failed to initialize ArcticDB: {e}")
-            raise
+            self._log_error(ErrorSeverity.CRITICAL, "Failed to initialize ArcticDB", e)
+            raise ConnectionError(f"Failed to initialize ArcticDB: {e}")
 
     def _init_libraries(self):
         """Initialize all required ArcticDB libraries"""
@@ -233,7 +318,12 @@ class TickStore:
             required_cols = ['timestamp', 'price', 'volume']
             missing_cols = [col for col in required_cols if col not in tick_df.columns]
             if missing_cols:
-                logger.error(f"Missing required columns for {symbol}: {missing_cols}")
+                self._log_error(
+                    ErrorSeverity.HIGH,
+                    f"Missing required columns for {symbol}",
+                    DataValidationError(f"Missing columns: {missing_cols}"),
+                    context={'symbol': symbol, 'date': date, 'missing_cols': missing_cols}
+                )
                 return False
 
             # Create storage key with symbol/date partitioning
@@ -301,9 +391,41 @@ class TickStore:
             except Exception as e:
                 if "not sorted" in str(e).lower() or "monotonic" in str(e).lower():
                     self.stats['validation_failures'] += 1
-                    logger.error(f"Index validation failed - data not properly sorted for {symbol} on {date}")
-                    # Could attempt to sort and retry here if needed
-                raise
+
+                    # Attempt to fix by sorting
+                    logger.warning(f"Data not sorted for {symbol} on {date}, attempting to fix...")
+                    try:
+                        normalized_df = normalized_df.sort_values('timestamp')
+
+                        # Retry write with sorted data
+                        self.tick_data_lib.write(
+                            storage_key,
+                            normalized_df,
+                            metadata=tick_metadata,
+                            prune_previous_versions=self.prune_versions,
+                            staged=self.staged_writes,
+                            validate_index=self.validate_index
+                        )
+                        logger.info(f"Successfully stored after sorting {len(normalized_df):,} ticks")
+                        return True
+
+                    except Exception as retry_error:
+                        self._log_error(
+                            ErrorSeverity.HIGH,
+                            f"Failed to store even after sorting",
+                            retry_error,
+                            context={'symbol': symbol, 'date': date, 'ticks': len(normalized_df)}
+                        )
+                        raise StorageError(f"Failed to store sorted data: {retry_error}")
+                else:
+                    # Other storage errors
+                    self._log_error(
+                        ErrorSeverity.HIGH,
+                        f"Storage error for {symbol} on {date}",
+                        e,
+                        context={'symbol': symbol, 'date': date}
+                    )
+                    raise StorageError(f"Failed to store data: {e}")
 
             # Update statistics
             self.stats['ticks_stored'] += len(normalized_df)
@@ -312,9 +434,22 @@ class TickStore:
             logger.info(f"Stored {len(normalized_df)} ticks for {storage_key}")
             return True
 
+        except DataValidationError:
+            # Already logged, just return False
+            self.stats['errors'] += 1
+            return False
+        except StorageError:
+            # Already logged and handled
+            self.stats['errors'] += 1
+            return False
         except Exception as e:
             self.stats['errors'] += 1
-            logger.error(f"Error storing ticks for {symbol} on {date}: {e}")
+            self._log_error(
+                ErrorSeverity.HIGH,
+                f"Unexpected error storing ticks",
+                e,
+                context={'symbol': symbol, 'date': date, 'error_type': type(e).__name__}
+            )
             return False
 
     def store_numpy_ticks(self,
@@ -1065,11 +1200,34 @@ class TickStore:
 
             # If critical errors found, return False
             if validation_errors:
-                logger.error(f"Validation errors for {symbol} on {date}: {', '.join(validation_errors)}")
-                # Only fail on critical errors
-                critical_errors = ['Date mismatch', 'Multiple dates', 'invalid times']
-                if any(error in str(validation_errors) for error in critical_errors):
+                # Categorize errors
+                critical_keywords = ['Date mismatch', 'Multiple dates', 'invalid times']
+                is_critical = any(error in str(validation_errors) for error in critical_keywords)
+
+                if is_critical:
+                    self._log_error(
+                        ErrorSeverity.HIGH,
+                        f"Critical validation errors for {symbol} on {date}",
+                        DataValidationError(', '.join(validation_errors)),
+                        context={
+                            'symbol': symbol,
+                            'date': date,
+                            'errors': validation_errors
+                        }
+                    )
                     return False
+                else:
+                    # Non-critical errors - log as warning but continue
+                    self._log_error(
+                        ErrorSeverity.MEDIUM,
+                        f"Non-critical validation issues for {symbol}",
+                        None,
+                        context={
+                            'symbol': symbol,
+                            'date': date,
+                            'warnings': validation_errors
+                        }
+                    )
 
             # Log summary statistics
             logger.debug(
@@ -1082,7 +1240,12 @@ class TickStore:
             return True
 
         except Exception as e:
-            logger.error(f"Error validating data ranges for {symbol}: {e}", exc_info=True)
+            self._log_error(
+                ErrorSeverity.HIGH,
+                f"Unexpected error during validation",
+                e,
+                context={'symbol': symbol, 'date': date}
+            )
             return False
 
     def _store_numpy_ticks_chunked(self,
@@ -1333,3 +1496,258 @@ class TickStore:
         stats['validation_enabled'] = self.validate_index
 
         return stats
+
+    def _log_error(self,
+                   severity: ErrorSeverity,
+                   message: str,
+                   exception: Optional[Exception] = None,
+                   context: Optional[Dict] = None):
+        """
+        Log error with context and maintain error history.
+
+        Args:
+            severity: Error severity level
+            message: Error message
+            exception: Optional exception object
+            context: Optional context dictionary
+        """
+        error_entry = {
+            'timestamp': datetime.now().isoformat(),
+            'severity': severity.name,
+            'message': message,
+            'exception': str(exception) if exception else None,
+            'exception_type': type(exception).__name__ if exception else None,
+            'context': context or {}
+        }
+
+        # Add to error history
+        self.error_history.append(error_entry)
+        if len(self.error_history) > self.max_error_history:
+            self.error_history.pop(0)
+
+        # Log based on severity
+        if severity == ErrorSeverity.CRITICAL:
+            logger.critical(f"{message}: {exception}", extra=context)
+        elif severity == ErrorSeverity.HIGH:
+            logger.error(f"{message}: {exception}", extra=context)
+        elif severity == ErrorSeverity.MEDIUM:
+            logger.warning(f"{message}: {exception}", extra=context)
+        else:
+            logger.info(f"{message}: {exception}", extra=context)
+
+    def get_error_summary(self) -> Dict:
+        """
+        Get summary of recent errors.
+
+        Returns:
+            Dictionary with error statistics and recent errors
+        """
+        if not self.error_history:
+            return {'total_errors': 0, 'recent_errors': []}
+
+        # Count by severity
+        severity_counts = {}
+        for error in self.error_history:
+            severity = error['severity']
+            severity_counts[severity] = severity_counts.get(severity, 0) + 1
+
+        # Get last 10 errors
+        recent_errors = self.error_history[-10:]
+
+        return {
+            'total_errors': len(self.error_history),
+            'severity_counts': severity_counts,
+            'recent_errors': recent_errors,
+            'validation_failures': self.stats['validation_failures'],
+            'retries_attempted': self.stats['retries_attempted'],
+            'retries_succeeded': self.stats['retries_succeeded']
+        }
+
+    def clear_error_history(self):
+        """Clear the error history"""
+        self.error_history = []
+        logger.info("Error history cleared")
+
+    def handle_corrupted_data(self, symbol: str, date: str) -> bool:
+        """
+        Attempt to recover from corrupted data.
+
+        Args:
+            symbol: Stock symbol
+            date: Date string
+
+        Returns:
+            True if recovery successful
+        """
+        try:
+            storage_key = f"{symbol}/{date}"
+            logger.warning(f"Attempting to recover corrupted data for {storage_key}")
+
+            # Try to read existing data
+            try:
+                existing_data = self.tick_data_lib.read(storage_key)
+                logger.info(f"Data readable, creating backup snapshot")
+
+                # Create backup snapshot
+                snapshot_name = f"backup_{symbol}_{date}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                self.tick_data_lib.snapshot(snapshot_name)
+
+                return True
+
+            except Exception as read_error:
+                logger.error(f"Data unreadable, attempting deletion: {read_error}")
+
+                # Delete corrupted data
+                try:
+                    self.tick_data_lib.delete(storage_key)
+                    logger.info(f"Deleted corrupted data for {storage_key}")
+                    return True
+                except Exception as delete_error:
+                    logger.error(f"Failed to delete corrupted data: {delete_error}")
+                    return False
+
+        except Exception as e:
+            self._log_error(
+                ErrorSeverity.HIGH,
+                f"Failed to handle corrupted data for {symbol} on {date}",
+                e
+            )
+            return False
+
+    def generate_diagnostic_report(self) -> str:
+        """
+        Generate a comprehensive diagnostic report for troubleshooting.
+
+        Returns:
+            Formatted diagnostic report string
+        """
+        report = []
+        report.append("=" * 80)
+        report.append("TICKSTORE DIAGNOSTIC REPORT")
+        report.append("=" * 80)
+        report.append(f"Generated: {datetime.now().isoformat()}")
+        report.append("")
+
+        # Configuration
+        report.append("CONFIGURATION:")
+        report.append(f"  Mode: {self.mode}")
+        report.append(f"  URI: {self.arctic_uri}")
+        report.append(f"  Batch Size: {self.write_batch_size:,}")
+        report.append(f"  Deduplication: {self.enable_deduplication}")
+        report.append(f"  Validate Index: {self.validate_index}")
+        report.append(f"  Prune Versions: {self.prune_versions}")
+        report.append("")
+
+        # Performance Stats
+        report.append("PERFORMANCE STATISTICS:")
+        report.append(f"  Ticks Stored: {self.stats['ticks_stored']:,}")
+        report.append(f"  Bytes Stored: {self.stats['bytes_stored']:,}")
+        report.append(f"  Queries Executed: {self.stats['queries_executed']:,}")
+        report.append(f"  Duplicates Removed: {self.stats['duplicates_removed']:,}")
+        report.append(f"  Snapshots Created: {self.stats['snapshots_created']:,}")
+
+        if self.stats['write_times_ms']:
+            avg_time = sum(self.stats['write_times_ms']) / len(self.stats['write_times_ms'])
+            report.append(f"  Avg Write Time: {avg_time:.1f}ms")
+            report.append(f"  Slow Writes: {sum(1 for t in self.stats['write_times_ms'] if t > self.slow_write_threshold)}")
+        report.append("")
+
+        # Error Summary
+        error_summary = self.get_error_summary()
+        report.append("ERROR SUMMARY:")
+        report.append(f"  Total Errors: {self.stats['errors']}")
+        report.append(f"  Validation Failures: {self.stats['validation_failures']}")
+        report.append(f"  Retries Attempted: {self.stats.get('retries_attempted', 0)}")
+        report.append(f"  Retries Succeeded: {self.stats.get('retries_succeeded', 0)}")
+
+        if error_summary['severity_counts']:
+            report.append("  By Severity:")
+            for severity, count in error_summary['severity_counts'].items():
+                report.append(f"    {severity}: {count}")
+
+        if error_summary['recent_errors']:
+            report.append("\n  Recent Errors (last 5):")
+            for error in error_summary['recent_errors'][-5:]:
+                report.append(f"    [{error['severity']}] {error['message']}")
+                if error['exception']:
+                    report.append(f"      Exception: {error['exception_type']}")
+        report.append("")
+
+        # Storage Status
+        try:
+            stored_data = self.list_stored_data()
+            report.append("STORAGE STATUS:")
+            report.append(f"  Total Symbols: {len(set(d['symbol'] for d in stored_data))}")
+            report.append(f"  Total Days: {len(stored_data)}")
+
+            if stored_data:
+                total_ticks = sum(d.get('tick_count', 0) for d in stored_data)
+                total_size = sum(d.get('storage_size_mb', 0) for d in stored_data)
+                report.append(f"  Total Ticks: {total_ticks:,}")
+                report.append(f"  Total Size: {total_size:.1f} MB")
+        except:
+            report.append("STORAGE STATUS: Unable to retrieve")
+
+        report.append("")
+        report.append("=" * 80)
+
+        return "\n".join(report)
+
+    def test_connectivity(self) -> Dict[str, bool]:
+        """
+        Test connectivity to ArcticDB and perform basic operations.
+
+        Returns:
+            Dictionary with test results
+        """
+        tests = {
+            'connection': False,
+            'read': False,
+            'write': False,
+            'list': False,
+            'snapshot': False
+        }
+
+        try:
+            # Test connection
+            tests['connection'] = self.arctic is not None
+
+            # Test list operation
+            try:
+                symbols = self.tick_data_lib.list_symbols()
+                tests['list'] = True
+            except:
+                pass
+
+            # Test write operation
+            try:
+                test_key = "_test_connectivity"
+                test_df = pd.DataFrame({
+                    'timestamp': [pd.Timestamp.now()],
+                    'value': [1.0]
+                })
+                self.tick_data_lib.write(test_key, test_df)
+                tests['write'] = True
+
+                # Test read operation
+                read_df = self.tick_data_lib.read(test_key).data
+                tests['read'] = True
+
+                # Clean up
+                self.tick_data_lib.delete(test_key)
+            except:
+                pass
+
+            # Test snapshot capability
+            try:
+                snapshot_name = "_test_snapshot"
+                self.tick_data_lib.snapshot(snapshot_name)
+                self.tick_data_lib.delete_snapshot(snapshot_name)
+                tests['snapshot'] = True
+            except:
+                pass
+
+        except Exception as e:
+            logger.error(f"Connectivity test failed: {e}")
+
+        return tests
