@@ -4,6 +4,7 @@ Hedge Fund-Grade Infrastructure with Full Metadata
 """
 import os
 import json
+import yaml
 import pandas as pd
 import numpy as np
 from datetime import datetime, date
@@ -11,6 +12,8 @@ from typing import Dict, List, Optional, Union, Tuple, Any
 import logging
 from pathlib import Path
 import warnings
+import gc
+import time
 
 # ArcticDB imports
 try:
@@ -38,20 +41,57 @@ class TickStore:
     """
 
     def __init__(self,
-                 arctic_uri: str = "lmdb://./data/arctic_storage",
-                 enable_compression: bool = True,
-                 cache_size_mb: int = 1000):
+                 config_file: str = "stage_01_data_engine/config/storage_config.yaml",
+                 arctic_uri: Optional[str] = None,
+                 override_mode: Optional[str] = None):
         """
-        Initialize tick storage system.
+        Initialize tick storage system with centralized configuration.
 
         Args:
-            arctic_uri: ArcticDB connection string
-            enable_compression: Enable LZ4 compression
-            cache_size_mb: Memory cache size in MB
+            config_file: Path to storage configuration file
+            arctic_uri: Optional override for ArcticDB connection string
+            override_mode: Optional override for operating mode ('backfill' or 'production')
         """
-        self.arctic_uri = arctic_uri
-        self.enable_compression = enable_compression
-        self.cache_size_mb = cache_size_mb
+        # Load configuration
+        self._load_config(config_file)
+
+        # Apply overrides if provided
+        if arctic_uri:
+            self.arctic_uri = arctic_uri
+        else:
+            self.arctic_uri = self.config['arctic']['uri']
+
+        if override_mode:
+            self.mode = override_mode
+        else:
+            self.mode = self.config['write_config']['mode']
+
+        # Extract settings based on mode
+        self.enable_compression = self.config['storage']['enable_compression']
+        self.cache_size_mb = self.config['storage']['cache_size_mb']
+
+        # Write configuration
+        write_cfg = self.config['write_config']
+        self.write_batch_size = write_cfg['batch_size']
+        self.enable_deduplication = write_cfg['enable_deduplication']
+        self.validate_index = write_cfg['validate_index']
+        self.staged_writes = write_cfg['staged_writes']
+        self.track_write_times = write_cfg['track_write_times']
+        self.slow_write_threshold = write_cfg['slow_write_threshold_ms']
+        self.max_memory_gb = write_cfg['max_memory_gb']
+        self.force_gc = write_cfg['force_garbage_collection']
+
+        # Version management based on mode
+        mode_cfg = write_cfg[self.mode]
+        self.prune_versions = mode_cfg['prune_previous_versions']
+        self.create_snapshots = mode_cfg['create_snapshots']
+        self.snapshot_frequency = mode_cfg['snapshot_frequency']
+
+        logger.info(f"TickStore initialized in {self.mode.upper()} mode")
+        logger.info(f"  - Batch size: {self.write_batch_size:,} ticks")
+        logger.info(f"  - Prune versions: {self.prune_versions}")
+        logger.info(f"  - Validate index: {self.validate_index}")
+        logger.info(f"  - Deduplication: {self.enable_deduplication}")
 
         # Initialize ArcticDB connection
         self._init_arctic()
@@ -66,10 +106,60 @@ class TickStore:
             'ticks_stored': 0,
             'bytes_stored': 0,
             'queries_executed': 0,
-            'errors': 0
+            'errors': 0,
+            'duplicates_removed': 0,
+            'write_times_ms': [],
+            'validation_failures': 0,
+            'versions_pruned': 0,
+            'snapshots_created': 0
         }
 
-        logger.info(f"TickStore initialized with URI: {arctic_uri}")
+        # Snapshot tracking
+        self.last_snapshot_date = None
+
+        logger.info(f"TickStore initialized with URI: {self.arctic_uri}")
+
+    def _load_config(self, config_file: str):
+        """Load configuration from YAML file"""
+        try:
+            config_path = Path(config_file)
+            if not config_path.exists():
+                # Try relative to project root
+                config_path = Path.cwd() / config_file
+
+            with open(config_path, 'r') as f:
+                self.config = yaml.safe_load(f)
+
+            logger.info(f"Loaded configuration from {config_path}")
+        except Exception as e:
+            logger.error(f"Failed to load config from {config_file}: {e}")
+            # Fall back to defaults
+            self.config = {
+                'arctic': {'uri': 'lmdb://./data/arctic_storage'},
+                'storage': {'enable_compression': True, 'cache_size_mb': 1000},
+                'write_config': {
+                    'mode': 'backfill',
+                    'batch_size': 2000000,
+                    'enable_deduplication': True,
+                    'validate_index': True,
+                    'staged_writes': False,
+                    'track_write_times': True,
+                    'slow_write_threshold_ms': 1000,
+                    'max_memory_gb': 2,
+                    'force_garbage_collection': True,
+                    'backfill': {
+                        'prune_previous_versions': False,
+                        'create_snapshots': True,
+                        'snapshot_frequency': 'weekly'
+                    },
+                    'production': {
+                        'prune_previous_versions': True,
+                        'create_snapshots': True,
+                        'snapshot_frequency': 'weekly'
+                    }
+                }
+            }
+            logger.warning("Using default configuration")
 
     def _init_arctic(self):
         """Initialize ArcticDB connection and libraries"""
@@ -167,12 +257,53 @@ class TickStore:
             # Prepare metadata
             tick_metadata = self._prepare_tick_metadata(symbol, date, normalized_df, metadata)
 
-            # Store to ArcticDB with compression
-            self.tick_data_lib.write(
-                storage_key,
-                normalized_df,
-                metadata=tick_metadata
-            )
+            # Deduplicate if enabled
+            if self.enable_deduplication:
+                original_len = len(normalized_df)
+                normalized_df = self._remove_duplicates(normalized_df)
+                duplicates_removed = original_len - len(normalized_df)
+                if duplicates_removed > 0:
+                    self.stats['duplicates_removed'] += duplicates_removed
+                    logger.info(f"Removed {duplicates_removed} duplicate ticks")
+
+            # Track write performance
+            write_start = time.time() if self.track_write_times else 0
+
+            # Store to ArcticDB with optimized configuration
+            try:
+                self.tick_data_lib.write(
+                    storage_key,
+                    normalized_df,
+                    metadata=tick_metadata,
+                    prune_previous_versions=self.prune_versions,
+                    staged=self.staged_writes,
+                    validate_index=self.validate_index
+                )
+
+                # Track performance metrics
+                if self.track_write_times:
+                    write_time = (time.time() - write_start) * 1000
+                    self.stats['write_times_ms'].append(write_time)
+
+                    if write_time > self.slow_write_threshold:
+                        logger.warning(f"Slow write detected: {write_time:.0f}ms for {len(normalized_df):,} ticks")
+
+                if self.prune_versions:
+                    self.stats['versions_pruned'] += 1
+
+                # Force garbage collection for large writes if configured
+                if self.force_gc and len(normalized_df) > self.write_batch_size:
+                    gc.collect()
+
+                # Check if we need to create a snapshot
+                self._check_snapshot_needed(symbol, date)
+
+            except Exception as e:
+                if "not sorted" in str(e).lower() or "monotonic" in str(e).lower():
+                    self.stats['validation_failures'] += 1
+                    logger.error(f"Index validation failed - data not properly sorted for {symbol} on {date}")
+                    # Could attempt to sort and retry here if needed
+                raise
 
             # Update statistics
             self.stats['ticks_stored'] += len(normalized_df)
@@ -1101,3 +1232,104 @@ class TickStore:
         except Exception as e:
             logger.error(f"Error during cleanup: {e}")
             return {'error': str(e)}
+
+    def _remove_duplicates(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Remove duplicate ticks based on timestamp only.
+        Keeps the first occurrence of each timestamp.
+
+        Args:
+            df: DataFrame with potential duplicates
+
+        Returns:
+            DataFrame with duplicates removed
+        """
+        if 'timestamp' in df.columns:
+            return df.drop_duplicates(subset=['timestamp'], keep='first')
+        return df
+
+    def _check_snapshot_needed(self, symbol: str, date: str):
+        """
+        Check if a snapshot should be created based on frequency setting.
+
+        Args:
+            symbol: Stock symbol
+            date: Date string
+        """
+        if not self.create_snapshots:
+            return
+
+        try:
+            current_date = pd.to_datetime(date)
+
+            # Determine if snapshot is needed based on frequency
+            create_snapshot = False
+
+            if self.snapshot_frequency == 'daily':
+                create_snapshot = True
+            elif self.snapshot_frequency == 'weekly':
+                # Create snapshot on Sundays
+                create_snapshot = current_date.dayofweek == 6
+            elif self.snapshot_frequency == 'monthly':
+                # Create snapshot on last day of month
+                next_day = current_date + pd.Timedelta(days=1)
+                create_snapshot = current_date.month != next_day.month
+
+            if create_snapshot:
+                snapshot_name = f"snapshot_{self.mode}_{date}"
+                try:
+                    # Create snapshot using ArcticDB's snapshot functionality
+                    self.tick_data_lib.snapshot(snapshot_name)
+                    self.stats['snapshots_created'] += 1
+                    self.last_snapshot_date = date
+                    logger.info(f"Created snapshot: {snapshot_name}")
+                except Exception as e:
+                    logger.error(f"Failed to create snapshot {snapshot_name}: {e}")
+
+        except Exception as e:
+            logger.error(f"Error checking snapshot need: {e}")
+
+    def switch_mode(self, new_mode: str):
+        """
+        Switch between backfill and production modes.
+
+        Args:
+            new_mode: Either 'backfill' or 'production'
+        """
+        if new_mode not in ['backfill', 'production']:
+            raise ValueError(f"Invalid mode: {new_mode}. Must be 'backfill' or 'production'")
+
+        old_mode = self.mode
+        self.mode = new_mode
+
+        # Update configuration based on new mode
+        mode_cfg = self.config['write_config'][new_mode]
+        self.prune_versions = mode_cfg['prune_previous_versions']
+        self.create_snapshots = mode_cfg['create_snapshots']
+        self.snapshot_frequency = mode_cfg['snapshot_frequency']
+
+        logger.info(f"Switched from {old_mode} to {new_mode} mode")
+        logger.info(f"  - Prune versions: {self.prune_versions}")
+        logger.info(f"  - Create snapshots: {self.create_snapshots}")
+
+    def get_write_stats(self) -> Dict:
+        """
+        Get detailed write performance statistics.
+
+        Returns:
+            Dictionary with performance metrics
+        """
+        stats = self.stats.copy()
+
+        if self.stats['write_times_ms']:
+            write_times = self.stats['write_times_ms']
+            stats['avg_write_time_ms'] = sum(write_times) / len(write_times)
+            stats['min_write_time_ms'] = min(write_times)
+            stats['max_write_time_ms'] = max(write_times)
+            stats['slow_writes'] = sum(1 for t in write_times if t > self.slow_write_threshold)
+
+        stats['mode'] = self.mode
+        stats['deduplication_enabled'] = self.enable_deduplication
+        stats['validation_enabled'] = self.validate_index
+
+        return stats

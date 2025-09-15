@@ -15,6 +15,41 @@ storage:
   write_buffer_size_mb: 256
   max_file_size_mb: 10240
 
+# ArcticDB Write Configuration
+write_config:
+  # Operating mode: "backfill" or "production"
+  mode: "backfill"  # IMPORTANT: Set to "backfill" during initial data loading
+
+  # Batch processing
+  batch_size: 2000000  # 2M ticks per batch (~1GB memory)
+
+  # Data quality
+  enable_deduplication: true  # Remove duplicate timestamps
+  validate_index: true  # Validate data is sorted (keep True for safety)
+
+  # Version management
+  backfill:
+    prune_previous_versions: false  # Keep all versions during backfill
+    create_snapshots: true  # Create safety snapshots
+    snapshot_frequency: "weekly"  # daily, weekly, monthly
+
+  production:
+    prune_previous_versions: true  # Prune old versions in production
+    create_snapshots: true  # Still create snapshots for safety
+    snapshot_frequency: "weekly"
+
+  # Write options
+  staged_writes: false  # Use direct writes for lower latency
+  parallel_writes: false  # Enable for multi-symbol concurrent writes
+
+  # Performance monitoring
+  track_write_times: true  # Monitor write performance
+  slow_write_threshold_ms: 1000  # Log writes slower than this
+
+  # Memory management
+  max_memory_gb: 2  # Maximum memory for write operations
+  force_garbage_collection: true  # Force GC after large writes
+
 # Library Configuration
 libraries:
   tick_data:
