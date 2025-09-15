@@ -27,7 +27,9 @@
 - **Advanced**: Custom time range selection
 
 ### Data Quality Standards
-- **NO fallbacks**: If primary data unavailable, we wait/retry, never substitute
+- **Institutional Smart Fallback**: Weekend/holiday requests automatically use last trading day
+- **NO_DATA Error Elimination**: Period-based PyIQFeed requests prevent weekend data failures
+- **NO synthetic substitutes**: If adjusted data unavailable, we wait/retry, never substitute fake data
 
 ### Historical Data Limits
 - **During market hours**: 8 trading days maximum
@@ -36,20 +38,57 @@
 
 ## Data Sources Architecture
 
-### IQFeed (Primary Market Data)
+### IQFeed (85% PyIQFeed API Utilization - Production Ready)
 ```
 stage_01_data_engine/
 ├── collectors/
-│   ├── tick_collector.py          # 50-tick & 5-second bars
-│   ├── dtn_indicators_collector.py # DTN Calculated Indicators
-│   └── iqfeed_historical.py       # Daily bulk downloads
+│   └── iqfeed_collector.py        # Enhanced PyIQFeed implementation (825+ lines)
+│       ├── Historical Data:       # Tick, daily, weekly, monthly, intraday bars
+│       ├── Real-time Streaming:   # Live quotes, trades, regional, bars
+│       ├── Lookups:              # Option chains, futures chains, symbol search, SIC/NAIC
+│       ├── Reference Data:       # Markets, security types, trade conditions
+│       ├── News Feeds:           # Headlines, full stories, story counts analytics
+│       └── Administrative:       # Connection stats, log levels, health monitoring
+├── session_manager.py             # Market hours & trading day logic
+├── iqfeed_constraints.py          # IQFeed limitations (simplified, no custom rate limiting)
 ├── storage/
-│   ├── tick_storage.py            # ArcticDB tick data
-│   ├── indicator_storage.py       # ArcticDB DTN indicators
-│   └── bar_builder.py             # All bar type construction
+│   ├── tick_storage.py           # ArcticDB tick data
+│   ├── indicator_storage.py      # ArcticDB DTN indicators
+│   └── bar_builder.py            # All bar type construction
 └── config/
-    └── indicator_config.yaml      # DTN symbol mappings
+    └── indicator_config.yaml     # DTN symbol mappings
 ```
+
+### IQFeed Capabilities (85% PyIQFeed Coverage)
+- **Historical Data (100%)**:
+  - Tick data with 180-day weekend optimization
+  - Daily, weekly, monthly OHLCV data
+  - Intraday bars with smart fallback
+  - Period-based requests with weekend/holiday handling
+- **Real-time Streaming (100%)**:
+  - QuoteConn, BarConn with VerboseListeners
+  - Complete watch/unwatch functionality
+- **Market Lookups (71%)**:
+  - Equity options, futures chains
+  - Symbol search by filter
+  - NEW: SIC/NAIC industry classification lookups
+- **News Integration (100%)**:
+  - Headlines, full stories
+  - NEW: Story counts analytics for sentiment
+- **Administrative (100%)**:
+  - NEW: Connection health monitoring
+  - NEW: Dynamic log level configuration
+  - Client statistics and diagnostics
+- **Business Logic**:
+  - Session-aware collection
+  - Native PyIQFeed rate limiting (no custom implementation)
+  - Asset class detection
+  - Smart date fallback to last trading day
+
+### Not Implemented (15% - Specialized Features)
+- **TableConn**: Level 2 market depth (not needed for current strategies)
+- **Futures Advanced**: Spread chains, options on futures (niche instruments)
+- **5MD/FDS**: Specialized futures data (not required)
 
 ### Arctic Storage Architecture
 Complete structure based on DTNCalculatedIndicators.pdf analysis:
