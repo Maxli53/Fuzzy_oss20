@@ -1,176 +1,157 @@
-# Stage 1 Data Engine - Testing GUI
+# 🖥️ Streamlit GUI for Tick Data Analysis
 
-Real-time Streamlit interface for testing the flexible storage system with actual market data.
+## Overview
+Professional-grade GUI for exploring and analyzing tick data stored in ArcticDB with pre-computed microstructure metrics. Focus on exploratory data analysis rather than trading operations.
 
-## Features
+## Current Implementation Status
+- ✅ Basic Streamlit structure with mock data
+- ✅ TradingView-style charting with Plotly
+- ✅ Data interface layer (partial)
+- ⏳ Real data connection to TickStore
+- ⏳ Metrics visualization
+- ⏳ Microstructure analysis tools
 
-### 🔍 Symbol Testing
-- Parse ANY financial symbol (stocks, futures, forex, options, DTN indicators)
-- See automatic categorization and routing decisions
-- View expected storage paths
-- Test symbol validity
+## 🎯 Core Functionality
 
-### 📂 Storage Inspector
-- Browse all stored symbols across all backends
-- View storage statistics and performance metrics
-- Inspect stored data with interactive charts
-- Monitor connection status to all components
+### Data Available for Visualization
+Each tick in our ArcticDB storage contains:
 
-### 🔄 Round-Trip Testing
-- Complete pipeline testing: Parse → Fetch → Store → Retrieve → Verify
-- Automated data integrity verification
-- Visual confirmation of storage functionality
-- Step-by-step success/failure reporting
+**Original IQFeed Fields:**
+- timestamp, price, volume, bid, ask
+- exchange, market_center, total_volume
+- condition codes (1-4)
 
-### 📈 Live Data Testing
-- Fetch real market data from IQFeed/Polygon
-- Store data using flexible storage system
-- Immediately retrieve and compare data
-- Visual data previews and verification
+**Pre-computed Metrics:**
+- spread, midpoint, spread_bps, spread_pct
+- dollar_volume, effective_spread
+- trade_sign (Lee-Ready classification)
+- log_return, tick_direction
+- volume_rate, trade_pct_of_day
+- is_extended_hours, is_odd_lot, is_regular
 
-## Quick Start
+## 📊 Proposed Streamlit GUI Structure
+### Sidebar (Control Panel)
+- **Connection Status Panel**
+  - ArcticDB connection (green/red indicator)
+  - IQFeed status (if live data enabled)
+  - Available symbols dropdown (from database)
+  - Date range selector
 
-### 1. Launch GUI
-```bash
-cd C:\Users\maxli\PycharmProjects\PythonProject\Fuzzy_oss20
-streamlit run gui/streamlit_app.py
-```
+- **Data Selection**
+  - Symbol input/selector
+  - Date picker (single or range)
+  - Time range filter (e.g., 9:30-16:00)
+  - Data type (Ticks with metrics / Aggregated bars)
 
-### 2. Test Symbol Parsing
-- Go to "Symbol Testing" tab
-- Enter any symbol (e.g., AAPL, @ES#, EUR/USD)
-- Click "Parse Symbol" to see categorization
-
-### 3. Fetch Real Data
-- Go to "Live Data Testing" tab
-- Enter a symbol (e.g., AAPL)
-- Click "Fetch Real Data"
-- Watch the complete pipeline in action
-
-### 4. Verify Storage
-- Use "Storage Inspector" to browse stored data
-- View performance metrics and statistics
-- Check data integrity
-
-## Symbol Examples
-
-### Stocks
-- AAPL, MSFT, TSLA, GOOGL, SPY, QQQ
-
-### Futures
-- @ES# (S&P 500), @NQ# (Nasdaq), @CL# (Oil), @GC# (Gold)
-
-### Forex
-- EUR/USD, GBP/USD, USD/JPY, AUD/USD
-
-### Options
-- AAPL230120C00150000 (AAPL Call)
-- SPY231215P00400000 (SPY Put)
-
-### DTN Indicators
-- $TICK, $TRIN, $VIX, $ADVN
-
-## GUI Sections
-
-### Sidebar
-- **Connection Status**: Live status of all components
-- **Quick Actions**: Refresh connections, view stats
+- **Filter Options**
+  - Trade conditions (regular/extended/odd lot)
+  - Spread range (min/max basis points)
+  - Volume threshold
+  - Trade sign filter (buy/sell/all)
 
 ### Main Tabs
+#### 1. **Data Discovery** 🔍
+- **Storage Overview**
+  - List all available symbols in ArcticDB
+  - Data coverage calendar (which dates have data)
+  - Storage statistics (rows, memory usage, compression ratio)
+  - Latest update timestamps
 
-#### Symbol Testing
-- Symbol input with examples
-- Real-time parsing results
-- Storage routing recommendations
-- Expected storage paths
+- **Quick Preview**
+  - Last 100 ticks for selected symbol
+  - Summary statistics (OHLC, volume, spread stats)
+  - Data quality indicators
 
-#### Storage Inspector
-- Storage system statistics
-- Performance metrics
-- Stored symbols browser
-- Data visualization
+#### 2. **Tick Explorer** 📈
+- **Data Grid View**
+  - Paginated tick data with ALL fields and metrics
+  - Sortable/filterable columns
+  - Color coding for trade conditions
+  - Trade sign indicators (↑ buy / ↓ sell)
 
-#### Round-Trip Testing
-- Complete pipeline verification
-- Automated testing
-- Step-by-step results
-- Data integrity checks
+- **Time Series Charts**
+  - Price with bid/ask bands
+  - Volume bars with trade sign coloring
+  - Spread evolution (basis points)
+  - Cumulative volume profile
 
-#### Live Data Testing
-- Real market data fetching
-- Storage verification
-- Data comparison
-- Visual confirmation
+- **Export Options**
+  - Filtered data to CSV
+  - Full day to Parquet
+  - Selected metrics only
 
-## Troubleshooting
+#### 3. **Microstructure Analysis** 🔬
+- **Spread Analytics**
+  - Intraday spread patterns
+  - Effective vs quoted spread comparison
+  - Spread distribution histogram
+  - Time-weighted average spread
 
-### Connection Issues
-- Check if IQFeed/Polygon services are running
-- Verify API credentials in config files
-- Check network connectivity
+- **Trade Classification**
+  - Lee-Ready accuracy metrics
+  - Buy/sell pressure indicators
+  - Trade sign distribution pie chart
+  - Cumulative trade imbalance
 
-### No Data Found
-- Market might be closed
-- Symbol might not exist
-- Data source might be unavailable
+- **Market Quality Metrics**
+  - Dollar volume by hour
+  - Trade size distribution
+  - Odd lot percentage over time
+  - Extended hours activity analysis
 
-### Storage Errors
-- Check ArcticDB installation
-- Verify storage directory permissions
-- Check available disk space
+#### 4. **Metrics Dashboard** 📊
+- **Pre-computed Metrics Visualization**
+  - Log returns distribution
+  - Tick direction patterns
+  - Volume rate analysis
+  - Trade intensity heatmap
 
-## Technical Details
+- **Condition Analysis**
+  - Extended hours vs regular comparison
+  - Odd lot impact on spreads
+  - Condition code frequency table
 
-### Architecture
-- **GUIDataInterface**: Wrapper around DataEngine
-- **Symbol Parser Widget**: DTN symbol parsing display
-- **Storage Viewer**: Data inspection and visualization
-- **Streamlit App**: Main application orchestration
+#### 5. **Multi-Symbol Comparison** 🔄
+- **Cross-Symbol Analysis**
+  - Relative spread comparison
+  - Volume patterns alignment
+  - Correlation matrices for metrics
+  - Synchronized time series plots
 
-### Data Flow
-1. User enters symbol → DTN Symbol Parser
-2. Real data fetch → IQFeed/Polygon collectors
-3. Data storage → FlexibleArcticStore via StorageRouter
-4. Data retrieval → Same storage system
-5. Verification → Compare original vs retrieved
+- **Sector/Peer Analysis**
+  - Compare similar stocks
+  - Identify outliers in metrics
+  - Benchmark against averages
 
-### File Structure
-```
-gui/
-├── streamlit_app.py              # Main Streamlit application
-├── data_interface.py             # DataEngine wrapper
-├── components/                   # Reusable UI components
-│   ├── symbol_parser_widget.py  # Symbol parsing display
-│   ├── storage_viewer.py         # Storage inspection tools
-│   └── __init__.py
-└── README.md                     # This file
-```
+#### 6. **Data Quality Monitor** ✅
+- **Validation Dashboard**
+  - Missing data detection
+  - Outlier identification
+  - Gap analysis (time between ticks)
+  - Data completeness scores
 
-## Configuration
+- **Pipeline Health**
+  - Last successful ingestion
+  - Error logs viewer
+  - Chunk processing statistics
+  - Memory usage tracking
 
-The GUI automatically uses your existing configuration:
-- `stage_01_data_engine/config/` - DataEngine configuration
-- `config/` - Global project configuration
-- Environment variables for API keys
+⚡ Technical Details
 
-## Performance
+IQFeed integration: via pyiqfeed Level1 (real-time) + HistoryProvider
 
-### Caching
-- DataEngine instance is cached across sessions
-- Connection status is checked efficiently
-- Large datasets are paginated for display
+Streaming handling: async callbacks → Streamlit st.session_state
 
-### Resource Usage
-- Minimal memory footprint
-- Efficient data loading
-- Automatic cleanup of temporary data
+Charts: Plotly (candlesticks, line, volume)
 
-## Support
+Tables: AgGrid (sortable/filterable live tables)
 
-If you encounter issues:
-1. Check the Streamlit console for error messages
-2. Verify all dependencies are installed
-3. Ensure configuration files are present
-4. Test individual components outside the GUI
+Storage: ArcticDB (high-performance) with stats exposed via GUI
 
-The GUI provides immediate visual confirmation that your flexible storage system is working correctly with real market data.
+✅ This way, your dev team gets:
+
+A professional trader-style dashboard
+
+A test harness for IQFeed + storage
+
+A GUI for monitoring + visualization

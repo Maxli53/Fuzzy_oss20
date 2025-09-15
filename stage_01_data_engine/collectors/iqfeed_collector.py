@@ -71,12 +71,53 @@ class IQFeedCollector:
         Get tick data using direct PyIQFeed patterns.
         OPTIMIZED: Uses 180-day weekend advantage for extended historical data.
         Returns native numpy array (NO DataFrame conversion).
+
+        IMPORTANT: This returns a NumPy STRUCTURED ARRAY, not a regular array!
+
+        Example return data structure:
+        -------------------------------
+        numpy.ndarray with dtype:
+        [('tick_id', '<u8'), ('date', '<M8[D]'), ('time', '<m8[us]'),
+         ('last', '<f8'), ('last_sz', '<u8'), ('last_type', 'S1'),
+         ('mkt_ctr', '<u4'), ('tot_vlm', '<u8'), ('bid', '<f8'),
+         ('ask', '<f8'), ('cond1', 'u1'), ('cond2', 'u1'),
+         ('cond3', 'u1'), ('cond4', 'u1')]
+
+        Sample tick: (3954, '2025-09-15', 26540953311, 236.62, 10, b'O', 11, 387902, 236.6, 236.67, 135, 61, 23, 0)
+
+        This represents:
+        - 3954: Tick ID (unique identifier)
+        - '2025-09-15': Trade date
+        - 26540953311: Microseconds since midnight ET (= 07:22:20.953311)
+        - 236.62: Trade price in dollars
+        - 10: Number of shares traded
+        - b'O': Exchange code (O = NYSE Arca)
+        - 11: Market center ID
+        - 387902: Cumulative volume for the day
+        - 236.6: Best bid at time of trade
+        - 236.67: Best ask at time of trade
+        - 135, 61, 23, 0: Trade condition codes
+
+        Args:
+            ticker: Stock symbol (e.g., 'AAPL', 'MSFT')
+            num_days: Number of days of historical data to request
+            max_ticks: Maximum number of ticks to return (default 10000)
+
+        Returns:
+            NumPy structured array with tick data, or None if error
         """
+        # ================================================================================
+        # STEP 1: Ensure IQFeed connection is active
+        # ================================================================================
         if not self.ensure_connection():
             logger.error("Cannot establish IQFeed connection for tick data")
             return None
 
-        # Universal smart fallback
+        # ================================================================================
+        # STEP 2: Handle weekends/holidays - smart fallback to last trading day
+        # ================================================================================
+        # If today is Saturday/Sunday/holiday, we automatically adjust to last trading day
+        # This prevents "NO_DATA" errors when requesting data on non-trading days
         today = datetime.now().date()
         adjusted_date, adjustment_metadata = self.session_manager.adjust_request_date(today, ticker)
 
@@ -85,49 +126,73 @@ class IQFeedCollector:
                        f"- requesting {num_days} days from last trading day ({adjusted_date})")
 
         try:
-            # Direct PyIQFeed connection following official example.py pattern
+            # ================================================================================
+            # STEP 3: Create IQFeed history connection
+            # ================================================================================
+            # Each connection gets a unique name for debugging/monitoring
             hist_conn = iq.HistoryConn(name=f"pyiqfeed-{ticker}-tick")
 
             with iq.ConnConnector([hist_conn]) as connector:
-                # OPTIMIZATION: Detect if we're outside market hours (weekends/after-hours)
-                is_weekend = datetime.now().weekday() >= 5
-                is_after_hours = datetime.now().hour >= 16 or datetime.now().hour < 9
+                # ================================================================================
+                # STEP 4: Optimize based on current time (WEEKEND ADVANTAGE!)
+                # ================================================================================
+                # IQFeed has different limits based on when you request data:
+                # - During market hours (9:30-16:00 ET weekdays): Limited to 8 days
+                # - After hours/weekends: Can get up to 180 days!
+
+                # Check current time
+                is_weekend = datetime.now().weekday() >= 5  # Saturday=5, Sunday=6
+                is_after_hours = datetime.now().hour >= 16 or datetime.now().hour < 9  # After 4pm or before 9am
 
                 if is_weekend or is_after_hours:
-                    # WEEKEND ADVANTAGE: Can get up to 180 days of tick data!
+                    # ============================================================================
+                    # WEEKEND/AFTER-HOURS PATH: Can get up to 180 days of tick data!
+                    # ============================================================================
                     logger.info(f"Weekend/after-hours detected - using extended tick data capability (up to 180 days)")
 
-                    # Simple: Just go back the requested number of calendar days
-                    end_date = adjusted_date  # Already the last trading day
-                    start_date = end_date - timedelta(days=min(num_days, 180))
+                    # Calculate date range
+                    end_date = adjusted_date  # Already adjusted to last trading day
+                    start_date = end_date - timedelta(days=min(num_days, 180))  # Cap at 180 days
 
-                    # Use period-based request for maximum data
+                    # Create datetime objects for the period request
+                    # We use market hours (9:30 AM - 4:00 PM ET) for the time range
                     start_time = datetime.combine(start_date, datetime_time(9, 30))
                     end_time = datetime.combine(end_date, datetime_time(16, 0))
 
+                    # Request tick data for the specified period
                     tick_data = hist_conn.request_ticks_in_period(
                         ticker=ticker,
-                        bgn_prd=start_time,
-                        end_prd=end_time,
-                        max_ticks=max_ticks
+                        bgn_prd=start_time,  # Begin period
+                        end_prd=end_time,    # End period
+                        max_ticks=max_ticks  # Maximum ticks to return
                     )
                 else:
-                    # During market hours: Limited to 8 days, use simple request
+                    # ============================================================================
+                    # MARKET HOURS PATH: Limited to 8 days
+                    # ============================================================================
                     logger.info(f"Market hours detected - using standard tick request (8 day limit)")
+
+                    # Simple request - IQFeed automatically goes back from current time
                     tick_data = hist_conn.request_ticks(
                         ticker=ticker,
                         max_ticks=max_ticks
                     )
 
+                # ================================================================================
+                # STEP 5: Log results and return NumPy array
+                # ================================================================================
                 logger.info(f"✓ {ticker}: Collected {len(tick_data) if tick_data is not None else 0} ticks "
                            f"(native numpy array with proper dtypes)")
 
-                # Log metadata (simplified approach - no attribute attachment)
+                # Log additional metadata for debugging
                 if tick_data is not None and len(tick_data) > 0:
                     logger.info(f"   Data collection metadata for {ticker}: "
                               f"adjustment={adjustment_metadata['adjustment_reason']}, "
                               f"asset_class={self.constraints.detect_asset_class(ticker).value}")
 
+                # Return the raw NumPy structured array
+                # NO PANDAS CONVERSION! This keeps data in its most efficient form
+                # The tick_store.py will handle conversion when storing
                 return tick_data
 
         except Exception as e:

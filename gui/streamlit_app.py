@@ -1,397 +1,164 @@
-"""
-Stage 1 Data Engine - Testing GUI
-Real-time testing interface for flexible storage system
-"""
+# tradingview_style_app.py
 import streamlit as st
 import pandas as pd
-import sys
-import os
-from datetime import datetime
-import logging
+import numpy as np
+import plotly.graph_objects as go
+import time
+from datetime import datetime, timedelta
 
-# Add project root to path
-sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+# ----------------------------
+# Mock Data Generators
+# ----------------------------
+def generate_mock_ohlcv(symbol="AAPL", days=5, freq="1min"):
+    """Generate mock OHLCV data for testing"""
+    idx = pd.date_range(
+        end=datetime.now(), periods=days * (390 if freq == "1min" else 78), freq=freq
+    )
+    price = np.cumsum(np.random.randn(len(idx))) + 150
+    ohlcv = pd.DataFrame(index=idx)
+    ohlcv["Open"] = price + np.random.randn(len(idx))
+    ohlcv["High"] = ohlcv["Open"] + abs(np.random.randn(len(idx)))
+    ohlcv["Low"] = ohlcv["Open"] - abs(np.random.randn(len(idx)))
+    ohlcv["Close"] = ohlcv["Open"] + np.random.randn(len(idx)) * 0.5
+    ohlcv["Volume"] = np.random.randint(1e4, 5e5, size=len(idx))
+    ohlcv.reset_index(inplace=True)
+    ohlcv.rename(columns={"index": "Datetime"}, inplace=True)
+    return ohlcv
 
-# Import our components
-from gui.data_interface import GUIDataInterface
-from gui.components.symbol_parser_widget import (
-    create_symbol_testing_section,
-    display_symbol_parse_results
-)
-from gui.components.storage_viewer import (
-    create_storage_inspector_section,
-    display_round_trip_test_results
-)
+def mock_system_metrics():
+    """Simulated system metrics"""
+    return {
+        "ticks_per_sec": np.random.randint(500, 2000),
+        "latency_ms": round(np.random.uniform(10, 100), 2),
+        "dropped_packets": np.random.randint(0, 5),
+        "cache_hit_ratio": f"{np.random.uniform(80, 99):.2f}%",
+    }
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+# ----------------------------
+# Indicators
+# ----------------------------
+def add_rsi(df, period=14):
+    delta = df["Close"].diff()
+    up = delta.clip(lower=0).rolling(period).mean()
+    down = -1 * delta.clip(upper=0).rolling(period).mean()
+    rs = up / down
+    df["RSI"] = 100 - (100 / (1 + rs))
+    return df
 
-# Page configuration
+def add_macd(df, short=12, long=26, signal=9):
+    df["EMA_short"] = df["Close"].ewm(span=short, adjust=False).mean()
+    df["EMA_long"] = df["Close"].ewm(span=long, adjust=False).mean()
+    df["MACD"] = df["EMA_short"] - df["EMA_long"]
+    df["Signal"] = df["MACD"].ewm(span=signal, adjust=False).mean()
+    df["Hist"] = df["MACD"] - df["Signal"]
+    return df
+
+# ----------------------------
+# Plotly Chart Builder
+# ----------------------------
+def plot_candles(df, symbol="AAPL"):
+    fig = go.Figure()
+
+    # Candlesticks
+    fig.add_trace(go.Candlestick(
+        x=df["Datetime"],
+        open=df["Open"], high=df["High"],
+        low=df["Low"], close=df["Close"],
+        name="Candles"
+    ))
+
+    # Volume
+    fig.add_trace(go.Bar(
+        x=df["Datetime"], y=df["Volume"],
+        name="Volume", marker_color="rgba(128,128,128,0.5)", yaxis="y2"
+    ))
+
+    # Layout
+    fig.update_layout(
+        title=f"{symbol} - Candlestick Chart",
+        yaxis=dict(title="Price"),
+        yaxis2=dict(title="Volume", overlaying="y", side="right", showgrid=False),
+        xaxis_rangeslider_visible=False,
+        template="plotly_dark",
+        margin=dict(l=10, r=10, t=30, b=10),
+        height=600,
+    )
+    return fig
+
+def plot_rsi(df):
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=df["Datetime"], y=df["RSI"], mode="lines", name="RSI"))
+    fig.add_hline(y=70, line=dict(color="red", dash="dot"))
+    fig.add_hline(y=30, line=dict(color="green", dash="dot"))
+    fig.update_layout(
+        title="RSI Indicator", template="plotly_dark", height=200, margin=dict(l=10, r=10, t=30, b=10)
+    )
+    return fig
+
+def plot_macd(df):
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=df["Datetime"], y=df["MACD"], name="MACD"))
+    fig.add_trace(go.Scatter(x=df["Datetime"], y=df["Signal"], name="Signal"))
+    fig.add_trace(go.Bar(x=df["Datetime"], y=df["Hist"], name="Histogram"))
+    fig.update_layout(
+        title="MACD Indicator", template="plotly_dark", height=200, margin=dict(l=10, r=10, t=30, b=10)
+    )
+    return fig
+
+# ----------------------------
+# Streamlit App
+# ----------------------------
 st.set_page_config(
-    page_title="Stage 1 Data Engine - Testing GUI",
-    page_icon="🏦",
+    page_title="Pro Trading Dashboard",
+    page_icon="📈",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="expanded",
 )
 
-def initialize_session_state():
-    """Initialize Streamlit session state variables"""
-    if 'data_interface' not in st.session_state:
-        st.session_state.data_interface = None
-    if 'last_parse_result' not in st.session_state:
-        st.session_state.last_parse_result = None
-    if 'last_fetch_result' not in st.session_state:
-        st.session_state.last_fetch_result = None
-    if 'last_store_result' not in st.session_state:
-        st.session_state.last_store_result = None
+st.title("📈 Pro Trading Dashboard (TradingView-style)")
+st.write("Mock demo dashboard with candlesticks, indicators, system monitor, and storage inspector")
+
+# Sidebar controls
+st.sidebar.header("🔧 Controls")
+symbol = st.sidebar.text_input("Symbol", "AAPL")
+timeframe = st.sidebar.selectbox("Timeframe", ["1min", "5min", "15min", "1h", "daily"])
+days = st.sidebar.slider("Lookback Days", 1, 30, 5)
+show_rsi = st.sidebar.checkbox("Show RSI", True)
+show_macd = st.sidebar.checkbox("Show MACD", True)
+
+# Generate mock data
+df = generate_mock_ohlcv(symbol, days=days, freq="1min" if timeframe == "1min" else "5min")
+df = add_rsi(df)
+df = add_macd(df)
+
+# Layout: main chart + indicators
+main_col, side_col = st.columns([3, 1])
+
+with main_col:
+    st.plotly_chart(plot_candles(df, symbol), use_container_width=True)
+
+    if show_rsi:
+        st.plotly_chart(plot_rsi(df), use_container_width=True)
+
+    if show_macd:
+        st.plotly_chart(plot_macd(df), use_container_width=True)
+
+with side_col:
+    st.subheader("⚡ System Monitor")
+    metrics = mock_system_metrics()
+    st.metric("Ticks/sec", metrics["ticks_per_sec"])
+    st.metric("Latency (ms)", metrics["latency_ms"])
+    st.metric("Dropped Packets", metrics["dropped_packets"])
+    st.metric("Cache Hit Ratio", metrics["cache_hit_ratio"])
+
+    st.subheader("📂 Storage Inspector (Mock)")
+    st.write("Available Symbols:")
+    st.json({"AAPL": ["1m", "5m", "daily"], "MSFT": ["1m", "15m"], "EUR/USD": ["ticks", "1m"]})
+
+    st.subheader("🕐 Sessions")
+    st.write("- Pre-market: 04:00–09:30\n- RTH: 09:30–16:00\n- After-hours: 16:00–20:00")
+
+# Footer
+st.markdown("---")
+st.caption(f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | Data: Mock generator")
 
-@st.cache_resource
-def get_data_interface():
-    """Get cached data interface instance"""
-    return GUIDataInterface()
-
-def main():
-    """Main Streamlit application"""
-    initialize_session_state()
-
-    # Sidebar
-    with st.sidebar:
-        st.title("🏦 Stage 1 Data Engine")
-        st.write("Real-time testing interface for flexible storage system")
-
-        # Initialize data interface
-        if st.session_state.data_interface is None:
-            with st.spinner("Initializing DataEngine..."):
-                st.session_state.data_interface = get_data_interface()
-
-        data_interface = st.session_state.data_interface
-
-        # Connection status
-        st.subheader("🔌 Connection Status")
-        connection_status = data_interface.get_connection_status()
-
-        status_icons = {
-            'data_engine': 'DataEngine',
-            'iqfeed': 'IQFeed',
-            'polygon': 'Polygon',
-            'storage': 'Storage'
-        }
-
-        for key, label in status_icons.items():
-            if connection_status.get(key, False):
-                st.success(f"✅ {label}")
-            else:
-                st.error(f"❌ {label}")
-
-        st.divider()
-
-        # Quick actions
-        st.subheader("⚡ Quick Actions")
-
-        if st.button("🔄 Refresh Connections", use_container_width=True):
-            st.session_state.data_interface = None
-            st.rerun()
-
-        if st.button("📊 View Storage Stats", use_container_width=True):
-            st.session_state.active_tab = "Storage Inspector"
-            st.rerun()
-
-    # Main content
-    st.title("🏦 Stage 1 Data Engine - Testing GUI")
-    st.write("Test your flexible storage system with real market data")
-
-    # Tab navigation
-    tab1, tab2, tab3, tab4 = st.tabs([
-        "🔍 Symbol Testing",
-        "📂 Storage Inspector",
-        "🔄 Round-Trip Testing",
-        "📈 Live Data Testing"
-    ])
-
-    with tab1:
-        symbol_testing_tab(data_interface)
-
-    with tab2:
-        storage_inspector_tab(data_interface)
-
-    with tab3:
-        round_trip_testing_tab(data_interface)
-
-    with tab4:
-        live_data_testing_tab(data_interface)
-
-def symbol_testing_tab(data_interface):
-    """Symbol parsing and categorization testing"""
-    st.header("🔍 Symbol Testing & Parsing")
-
-    symbol, parse_button = create_symbol_testing_section()
-
-    if parse_button and symbol:
-        with st.spinner(f"Parsing symbol {symbol}..."):
-            parse_result = data_interface.parse_symbol(symbol)
-            st.session_state.last_parse_result = parse_result
-
-    # Display parse results
-    if st.session_state.last_parse_result:
-        st.divider()
-        display_symbol_parse_results(st.session_state.last_parse_result)
-
-def storage_inspector_tab(data_interface):
-    """Storage system inspection and browsing"""
-    create_storage_inspector_section(data_interface)
-
-def round_trip_testing_tab(data_interface):
-    """Complete round-trip testing"""
-    st.header("🔄 Round-Trip Testing")
-    st.write("Complete test: Parse → Fetch → Store → Retrieve → Verify")
-
-    col1, col2 = st.columns([2, 1])
-
-    with col1:
-        test_symbol = st.text_input(
-            "Symbol to test:",
-            placeholder="Enter symbol for complete round-trip test",
-            help="This will test the entire pipeline with real data"
-        )
-
-    with col2:
-        st.write("")  # Spacing
-        run_test = st.button(
-            "🚀 Run Complete Test",
-            disabled=not test_symbol,
-            use_container_width=True
-        )
-
-    if run_test and test_symbol:
-        st.divider()
-
-        with st.spinner(f"Running complete round-trip test for {test_symbol}..."):
-            test_result = data_interface.perform_round_trip_test(test_symbol.strip().upper())
-
-        display_round_trip_test_results(test_result)
-
-def live_data_testing_tab(data_interface):
-    """Live data fetching and storage testing"""
-    st.header("📈 Live Data Testing")
-    st.write("Fetch real market data and test storage in real-time")
-
-    # Symbol input
-    col1, col2 = st.columns([2, 1])
-
-    with col1:
-        live_symbol = st.text_input(
-            "Symbol for live data:",
-            placeholder="Enter symbol to fetch real data",
-            help="Fetch real-time or recent market data"
-        )
-
-    with col2:
-        st.write("")  # Spacing
-        fetch_button = st.button(
-            "📡 Fetch Real Data",
-            disabled=not live_symbol,
-            use_container_width=True
-        )
-
-    # Data fetching options
-    with st.expander("🛠️ Fetch Options"):
-        col1, col2, col3 = st.columns(3)
-
-        with col1:
-            data_type = st.selectbox(
-                "Data Type:",
-                options=[
-                    # Time-based
-                    'ticks', '1s', '5s', '1m', '5m', '15m', '1h', 'daily',
-                    # Advanced bars
-                    'tick_50', 'tick_100', 'tick_200',
-                    'volume_1000', 'volume_5000', 'volume_10000',
-                    'dollar_10000', 'dollar_50000', 'dollar_100000',
-                    'imbalance', 'volatility', 'range', 'renko',
-                    # Legacy
-                    'bars', 'quotes'
-                ],
-                index=3,  # Default to '1m'
-                help="Complete bar type selection including advanced types"
-            )
-
-        with col2:
-            lookback_days = st.number_input(
-                "Lookback Days:",
-                min_value=1,
-                max_value=30,
-                value=1,
-                help="Number of days to look back"
-            )
-
-        with col3:
-            max_records = st.number_input(
-                "Max Records:",
-                min_value=100,
-                max_value=10000,
-                value=1000,
-                help="Maximum records to fetch"
-            )
-
-    # Market hours controls
-    with st.expander("🕐 Market Hours Control"):
-        col1, col2, col3 = st.columns(3)
-
-        with col1:
-            market_hours_only = st.checkbox("Market Hours Only (09:30-16:00)", value=True)
-        with col2:
-            include_premarket = st.checkbox("Include Pre-market (04:00-09:30)", value=False)
-        with col3:
-            include_afterhours = st.checkbox("Include After-hours (16:00-20:00)", value=False)
-
-    if fetch_button and live_symbol:
-        st.divider()
-
-        symbol = live_symbol.strip().upper()
-
-        # Step 1: Parse symbol
-        st.subheader(f"Step 1: Parsing {symbol}")
-        with st.spinner("Parsing symbol..."):
-            parse_result = data_interface.parse_symbol(symbol)
-
-        if parse_result['success']:
-            st.success("✅ Symbol parsed successfully")
-            st.json(parse_result['parsed_info'])
-        else:
-            st.error(f"❌ Symbol parsing failed: {parse_result['error']}")
-            return
-
-        # Step 2: Fetch real data
-        st.subheader(f"Step 2: Fetching Real Data for {symbol}")
-        with st.spinner(f"Fetching {data_type} data from market sources..."):
-            # Handle advanced bar types through direct collector access
-            if data_type in ['ticks', 'bars', 'quotes']:
-                # Use existing interface for basic types
-                fetch_result = data_interface.fetch_real_data(
-                    symbol=symbol,
-                    data_type=data_type,
-                    lookback_days=lookback_days,
-                    max_records=max_records
-                )
-            else:
-                # Use collector directly for advanced bar types
-                try:
-                    collector_data = data_interface.data_engine.iqfeed_collector.collect_bars(
-                        symbols=[symbol],
-                        bar_type=data_type,
-                        lookback_days=lookback_days,
-                        market_hours_only=market_hours_only,
-                        include_premarket=include_premarket,
-                        include_afterhours=include_afterhours,
-                        max_ticks=max_records
-                    )
-
-                    if collector_data is not None and not collector_data.empty:
-                        fetch_result = {
-                            'success': True,
-                            'data': collector_data,
-                            'source': 'IQFeed',
-                            'metadata': {
-                                'records_count': len(collector_data),
-                                'date_range': f"{collector_data['timestamp'].min()} to {collector_data['timestamp'].max()}"
-                            }
-                        }
-                    else:
-                        fetch_result = {'success': False, 'error': 'No data returned from collector'}
-
-                except Exception as e:
-                    fetch_result = {'success': False, 'error': f'Collector error: {str(e)}'}
-
-        if fetch_result['success']:
-            data = fetch_result['data']
-            metadata = fetch_result['metadata']
-            source = fetch_result['source']
-
-            st.success(f"✅ Data fetched successfully from {source}")
-
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Records", metadata['records_count'])
-            with col2:
-                st.metric("Source", source)
-            with col3:
-                st.metric("Columns", len(metadata['columns']))
-
-            # Display data preview
-            with st.expander("📋 Data Preview"):
-                st.dataframe(data.head(20), use_container_width=True)
-
-            # Step 3: Store data
-            st.subheader(f"Step 3: Storing Data for {symbol}")
-            store_button = st.button(f"💾 Store {len(data)} records")
-
-            if store_button:
-                with st.spinner("Storing data in flexible storage..."):
-                    store_result = data_interface.store_data(
-                        symbol=symbol,
-                        data=data,
-                        data_type=data_type
-                    )
-
-                if store_result['success']:
-                    st.success("✅ Data stored successfully")
-                    st.write(f"**Backend:** {store_result['backend_used']}")
-                    st.write(f"**Storage Location:** {store_result['storage_location']}")
-
-                    # Step 4: Verify storage
-                    st.subheader(f"Step 4: Verifying Storage for {symbol}")
-                    with st.spinner("Retrieving stored data for verification..."):
-                        verify_result = data_interface.retrieve_stored_data(symbol)
-
-                    if verify_result['success']:
-                        retrieved_data = verify_result['data']
-                        st.success(f"✅ Data verified - Retrieved {len(retrieved_data)} records")
-
-                        # Compare original vs retrieved
-                        comparison = pd.DataFrame({
-                            'Metric': ['Record Count', 'Column Count', 'Index Start', 'Index End'],
-                            'Original': [
-                                len(data),
-                                len(data.columns),
-                                str(data.index.min()),
-                                str(data.index.max())
-                            ],
-                            'Retrieved': [
-                                len(retrieved_data),
-                                len(retrieved_data.columns),
-                                str(retrieved_data.index.min()),
-                                str(retrieved_data.index.max())
-                            ]
-                        })
-
-                        st.dataframe(comparison, use_container_width=True)
-
-                        # Show if data matches
-                        if len(data) == len(retrieved_data) and list(data.columns) == list(retrieved_data.columns):
-                            st.success("🎉 Perfect match! Storage system working correctly.")
-                        else:
-                            st.warning("⚠️ Some differences detected between original and retrieved data.")
-
-                    else:
-                        st.error(f"❌ Data verification failed: {verify_result['error']}")
-
-                else:
-                    st.error(f"❌ Data storage failed: {store_result['error']}")
-
-        else:
-            st.error(f"❌ Data fetch failed: {fetch_result['error']}")
-            st.write("**Possible causes:**")
-            st.write("- Market is closed")
-            st.write("- Symbol not found")
-            st.write("- Data source not connected")
-            st.write("- Network issues")
-
-    # Footer
-    st.divider()
-    st.write(f"**Last updated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-
-if __name__ == "__main__":
-    main()

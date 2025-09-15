@@ -71,7 +71,7 @@ volatility:
 
 # Collection Parameters
 collection_settings:
-  update_frequency_seconds: 1      # How often to collect during market hours
+  update_frequency_seconds: 10      # How often to collect during market hours
   batch_size: 100                  # Number of indicators per batch
   retry_attempts: 3                # Number of retries on failure
   timeout_seconds: 30              # Timeout for each collection

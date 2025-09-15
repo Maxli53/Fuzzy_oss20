@@ -1,10 +1,21 @@
 #!/usr/bin/env python3
 """
 Show detailed AAPL tick data preview.
+
+This script demonstrates:
+1. How to fetch tick data from IQFeed
+2. How to interpret the NumPy structured array format
+3. How to decode exchange codes and condition codes
+4. How to convert time fields to human-readable format
+5. How to analyze tick data for trading insights
+
+IMPORTANT: This shows RAW tick data as it comes from the exchange.
+Each tick represents a SINGLE TRADE that occurred in the market.
 """
 
 import sys
 import os
+# Add PyIQFeed library to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'pyiqfeed_orig'))
 
 import pyiqfeed as iq
@@ -12,19 +23,29 @@ import numpy as np
 from datetime import datetime, timedelta
 
 def show_aapl_ticks():
-    """Show AAPL tick data in full detail."""
+    """
+    Show AAPL tick data in full detail.
+
+    This function demonstrates the complete tick data structure
+    and how to interpret each field for trading analysis.
+    """
     print("="*100)
     print("AAPL (Apple Inc.) - TICK BY TICK DATA")
     print("="*100)
 
+    # ================================================================================
+    # STEP 1: Connect to IQFeed and request tick data
+    # ================================================================================
     hist_conn = iq.HistoryConn(name="aapl-ticks")
     with iq.ConnConnector([hist_conn]) as connector:
-        # Get more ticks for better analysis
-        data = hist_conn.request_ticks("AAPL", max_ticks=50)  # Last 50 ticks
+        # Request last 50 trades for AAPL
+        # Each tick = one actual trade that occurred
+        data = hist_conn.request_ticks("AAPL", max_ticks=50)
 
-        print(f"\nData type: {type(data)}")
-        print(f"Total ticks retrieved: {len(data)}")
-        print(f"Dtype fields: {data.dtype.names}")
+        # Show what type of data we received
+        print(f"\nData type: {type(data)}")  # numpy.ndarray
+        print(f"Total ticks retrieved: {len(data)}")  # Should be 50 or less
+        print(f"Dtype fields: {data.dtype.names}")  # Field names in structured array
 
         print("\n" + "="*100)
         print("RAW DATA STRUCTURE (First 5 ticks)")

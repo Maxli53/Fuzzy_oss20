@@ -5,49 +5,86 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="8e156955-93dd-457c-9b55-1b37e2aed72d" name="Changes" comment="">
-      <change afterPath="$PROJECT_DIR$/docs/CLAUDE.md" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/stage_01_data_engine/tests/__init__.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.claude/settings.local.json" beforeDir="false" afterPath="$PROJECT_DIR$/.claude/settings.local.json" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/CLAUDE.md" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/docs/AAPL latest_ticks.png" beforeDir="false" afterPath="$PROJECT_DIR$/docs/AAPL latest_ticks.png" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/analyze_friday_volume.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/audit_iqfeed_api.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/check_tick_ids.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/compare_fields.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/debug_daily.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/debug_iqfeed_data.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/debug_simple.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/debug_tick_validation.py" beforeDir="false" />
       <change beforePath="$PROJECT_DIR$/docs/Data_policy.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/Data_policy.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/gui/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/gui/README.md" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/gui/streamlit_app.py" beforeDir="false" afterPath="$PROJECT_DIR$/gui/streamlit_app.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/recreate_17k_test.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/show_aapl_ticks.py" beforeDir="false" afterPath="$PROJECT_DIR$/stage_01_data_engine/tests/show_aapl_ticks.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/stage_01_data_engine/collectors/iqfeed_collector.py" beforeDir="false" afterPath="$PROJECT_DIR$/stage_01_data_engine/collectors/iqfeed_collector.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/stage_01_data_engine/config/bar_config.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/stage_01_data_engine/config/bar_config.yaml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/stage_01_data_engine/config/indicator_config.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/stage_01_data_engine/config/indicator_config.yaml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/stage_01_data_engine/config/storage_config.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/stage_01_data_engine/config/storage_config.yaml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/stage_01_data_engine/connector.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/stage_01_data_engine/storage/tick_store.py" beforeDir="false" afterPath="$PROJECT_DIR$/stage_01_data_engine/storage/tick_store.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/test_advanced_bars.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/test_iqfeed_correct_api.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/test_iqfeed_direct.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/test_request_ticks.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/test_round_trip.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/test_time_conversion.py" beforeDir="false" afterPath="$PROJECT_DIR$/stage_01_data_engine/tests/test_time_conversion.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/validate_friday_api.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/validate_specific_ticks.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/validate_timestamps.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/verify_all_fields.py" beforeDir="false" afterPath="$PROJECT_DIR$/stage_01_data_engine/tests/verify_all_fields.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
     <option name="LAST_RESOLUTION" value="IGNORE" />
   </component>
+  <component name="FileTemplateManagerImpl">
+    <option name="RECENT_TEMPLATES">
+      <list>
+        <option value="Python Script" />
+      </list>
+    </option>
+  </component>
   <component name="Git.Settings">
     <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
   </component>
-  <component name="ProjectColorInfo"><![CDATA[{
-  "associatedIndex": 7
-}]]></component>
+  <component name="ProjectColorInfo">{
+  &quot;associatedIndex&quot;: 7
+}</component>
   <component name="ProjectId" id="32eM66WKZdlQZAh2O9fs97MeOgE" />
   <component name="ProjectViewState">
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent"><![CDATA[{
-  "keyToString": {
-    "ModuleVcsDetector.initialDetectionPerformed": "true",
-    "RunOnceActivity.ShowReadmeOnStart": "true",
-    "RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager": "true",
-    "RunOnceActivity.git.unshallow": "true",
-    "git-widget-placeholder": "master",
-    "node.js.detected.package.eslint": "true",
-    "node.js.detected.package.tslint": "true",
-    "node.js.selected.package.eslint": "(autodetect)",
-    "node.js.selected.package.tslint": "(autodetect)",
-    "nodejs_package_manager_path": "npm",
-    "vue.rearranger.settings.migration": "true"
+  <component name="PropertiesComponent">{
+  &quot;keyToString&quot;: {
+    &quot;ModuleVcsDetector.initialDetectionPerformed&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
+    &quot;git-widget-placeholder&quot;: &quot;master&quot;,
+    &quot;node.js.detected.package.eslint&quot;: &quot;true&quot;,
+    &quot;node.js.detected.package.tslint&quot;: &quot;true&quot;,
+    &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
+    &quot;node.js.selected.package.tslint&quot;: &quot;(autodetect)&quot;,
+    &quot;nodejs_package_manager_path&quot;: &quot;npm&quot;,
+    &quot;vue.rearranger.settings.migration&quot;: &quot;true&quot;
+  },
+  &quot;keyToStringList&quot;: {
+    &quot;com.intellij.ide.scratch.ScratchImplUtil$2/New Scratch File&quot;: [
+      &quot;Python&quot;
+    ]
   }
-}]]></component>
+}</component>
   <component name="RecentsManager">
     <key name="MoveFile.RECENT_KEYS">
       <recent name="C:\Users\maxli\PycharmProjects\PythonProject\Fuzzy_oss20\docs" />
+      <recent name="C:\Users\maxli\PycharmProjects\PythonProject\Fuzzy_oss20\stage_01_data_engine\tests" />
     </key>
   </component>
   <component name="SharedIndexes">
@@ -65,7 +102,8 @@
       <option name="number" value="Default" />
       <option name="presentableId" value="Default" />
       <updated>1757776406180</updated>
-      <workItem from="1757776407209" duration="44668000" />
+      <workItem from="1757776407209" duration="67922000" />
+      <workItem from="1757918540074" duration="16954000" />
     </task>
     <servers />
   </component>

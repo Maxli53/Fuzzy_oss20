@@ -19,7 +19,15 @@
       "Bash(tasklist)",
       "Bash(findstr:*)",
       "Read(//c/Users/maxli/PytharmProjects/PythonProject/**)",
-      "Bash(tasklist:*)"
+      "Bash(tasklist:*)",
+      "Bash(cp:*)",
+      "Bash(curl:*)",
+      "Bash(rm:*)",
+      "Bash(grep:*)",
+      "Bash(mv:*)",
+      "Bash(dir:*)",
+      "Bash(cmd /c dir:*)",
+      "Bash(cmd /c:*)"
     ],
     "deny": [],
     "ask": []

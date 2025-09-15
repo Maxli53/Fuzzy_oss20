@@ -1,6 +1,18 @@
 #!/usr/bin/env python3
 """
 Verify that all fields from NumPy tick array are preserved in storage.
+
+This script is CRITICAL for ensuring data integrity in our pipeline:
+1. Shows exactly what fields IQFeed provides
+2. Demonstrates how we map each field to DataFrame columns
+3. Verifies no data is lost in the conversion
+4. Confirms values match exactly between NumPy and DataFrame
+
+WHY THIS MATTERS:
+- Trading decisions depend on accurate data
+- Missing fields could mean missing trading signals
+- Incorrect conversions could lead to wrong prices/volumes
+- This verification ensures our storage is reliable
 """
 
 import sys
@@ -12,7 +24,12 @@ import pandas as pd
 import numpy as np
 
 def verify_field_preservation():
-    """Verify all IQFeed fields are preserved."""
+    """
+    Verify all IQFeed fields are preserved during NumPy -> DataFrame conversion.
+
+    This function acts as a unit test for our data pipeline, ensuring
+    that every single field from IQFeed makes it into our storage correctly.
+    """
     print("="*80)
     print("FIELD PRESERVATION VERIFICATION")
     print("="*80)

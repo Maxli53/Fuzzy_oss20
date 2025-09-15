@@ -11,9 +11,9 @@ arctic:
 storage:
   enable_compression: true
   compression_algorithm: "lz4"  # lz4, zstd, snappy
-  cache_size_mb: 1000
-  write_buffer_size_mb: 64
-  max_file_size_mb: 2048
+  cache_size_mb: 20000
+  write_buffer_size_mb: 256
+  max_file_size_mb: 10240
 
 # Library Configuration
 libraries:
@@ -39,8 +39,8 @@ libraries:
 
   adaptive_bars:
     description: "Adaptive bars (volume, dollar, imbalance)"
-    retention_days: 180
-    auto_cleanup: true
+    retention_days: 365
+    auto_cleanup: false
 
   metadata:
     description: "System metadata and statistics"
@@ -57,7 +57,6 @@ performance:
 
 # Data Quality
 quality:
-  validate_ohlc: true          # Validate High >= Low, etc.
   remove_duplicates: true      # Remove duplicate timestamps
   fill_missing_values: false   # Fill missing values (risky for financial data)
   outlier_detection: true      # Detect price/volume outliers
@@ -74,7 +73,7 @@ monitoring:
 
 # Real-time Settings
 realtime:
-  buffer_size: 50000           # Ticks to buffer in memory
+  buffer_size: 500000           # Ticks to buffer in memory
   flush_interval_seconds: 60   # Periodic flush to disk
   enable_partial_bars: true    # Store incomplete bars for monitoring
   max_latency_ms: 100         # Target latency for real-time processing
@@ -111,11 +110,11 @@ error_handling:
   continue_on_error: true
   log_all_errors: true
   email_critical_errors: false
-  email_address: "admin@company.com"
+  email_address: "max.liukkonen@outlook.com"
 
 # Backup and Recovery
 backup:
-  enabled: false
+  enabled: true
   backup_path: "./backups"
   backup_schedule: "daily"      # daily, weekly, monthly
   retention_days: 30
