@@ -13,7 +13,7 @@ import logging
 from pathlib import Path
 
 # Import our modules
-from stage_01_data_engine.collector import DataCollector
+from stage_01_data_engine.collectors.iqfeed_collector import IQFeedCollector
 from stage_01_data_engine.storage import TickStore, BarBuilder, AdaptiveThresholds
 
 # Setup logging to see all API responses
@@ -31,7 +31,7 @@ class RealTickDataTest:
         self.test_date = datetime.now().strftime('%Y-%m-%d')
 
         # Initialize components
-        self.data_collector = DataCollector()
+        self.data_collector = IQFeedCollector()
         self.tick_store = TickStore()
         self.bar_builder = BarBuilder()
         self.adaptive_thresholds = AdaptiveThresholds(self.tick_store, "stage_01_data_engine/config/symbol_config.yaml")
@@ -56,13 +56,13 @@ class RealTickDataTest:
                 logger.error("FAILED: No tick data returned from IQFeed API")
                 return False
 
-            if tick_data.empty:
-                logger.error("FAILED: Empty tick data DataFrame returned")
+            if len(tick_data) == 0:
+                logger.error("FAILED: Empty tick data array returned")
                 return False
 
             # Validate API response
             logger.info(f"SUCCESS: Received {len(tick_data)} ticks from IQFeed")
-            logger.info(f"Columns: {list(tick_data.columns)}")
+            logger.info(f"NumPy fields: {tick_data.dtype.names}")
 
             # Test 2: Validate against user's screenshot format
             self._compare_with_user_format(tick_data)
@@ -87,57 +87,58 @@ class RealTickDataTest:
             logger.error(f"FAILED: IQFeed tick API test error: {e}")
             return False
 
-    def _compare_with_user_format(self, tick_data: pd.DataFrame):
+    def _compare_with_user_format(self, tick_data: np.ndarray):
         """Compare our tick data format with user's IQFeed screenshot"""
         logger.info("=== COMPARING WITH USER'S IQFEED FORMAT ===")
 
-        # User's screenshot shows these fields:
-        expected_fields = {
-            'timestamp': 'Time (15:59:59.970208)',
-            'price': 'Price (234.0700)',
-            'volume': 'Inc Vol (394)',
-            'bid': 'Bid (234.0500)',
-            'ask': 'Ask (234.0700)',
-            'exchange': 'Mkt Center (NASDAQ)',
-            'conditions': 'Trade Conditions (REGULAR)'
+        # IQFeed NumPy fields mapping to user's screenshot:
+        iqfeed_fields = {
+            'time': 'Time (microseconds since midnight)',
+            'last': 'Price (trade price)',
+            'last_sz': 'Volume (shares traded)',
+            'bid': 'Bid (best bid)',
+            'ask': 'Ask (best ask)',
+            'last_type': 'Exchange (market center)',
+            'cond1': 'Trade Conditions (code1)',
+            'cond2': 'Trade Conditions (code2)'
         }
 
-        logger.info("Expected fields from user's screenshot:")
-        for field, example in expected_fields.items():
-            if field in tick_data.columns:
-                sample_value = tick_data[field].iloc[0] if len(tick_data) > 0 else "N/A"
-                logger.info(f"✓ {field}: {example} -> Our value: {sample_value}")
+        logger.info("IQFeed fields compared to user's screenshot:")
+        for field, description in iqfeed_fields.items():
+            if field in tick_data.dtype.names:
+                sample_value = tick_data[field][0] if len(tick_data) > 0 else "N/A"
+                logger.info(f"✓ {field}: {description} -> Value: {sample_value}")
             else:
-                logger.warning(f"✗ {field}: {example} -> MISSING from our data")
+                logger.warning(f"✗ {field}: {description} -> MISSING from NumPy array")
 
         # Show sample data side by side
         if len(tick_data) > 0:
             logger.info("\n=== SAMPLE TICK COMPARISON ===")
-            sample = tick_data.iloc[0]
+            sample = tick_data[0]  # First tick from NumPy array
 
             logger.info("User's format (from screenshot):")
             logger.info("Time=15:59:59.970208, Price=234.0600, Volume=394, Bid=234.0500, Ask=234.0700")
             logger.info("Mkt_Center=NASDAQ, Conditions=REGULAR")
 
-            logger.info("\nOur format:")
-            logger.info(f"Time={sample.get('timestamp', 'N/A')}")
-            logger.info(f"Price=${sample.get('price', 'N/A'):.4f}")
-            logger.info(f"Volume={sample.get('volume', 'N/A')}")
-            logger.info(f"Bid=${sample.get('bid', 'N/A'):.4f}")
-            logger.info(f"Ask=${sample.get('ask', 'N/A'):.4f}")
-            logger.info(f"Exchange={sample.get('exchange', 'N/A')}")
-            logger.info(f"Conditions={sample.get('conditions', 'N/A')}")
+            logger.info("\nOur NumPy format:")
+            logger.info(f"Time={sample['time']} microseconds")
+            logger.info(f"Price=${sample['last']:.4f}")
+            logger.info(f"Volume={sample['last_sz']}")
+            logger.info(f"Bid=${sample['bid']:.4f}")
+            logger.info(f"Ask=${sample['ask']:.4f}")
+            logger.info(f"Exchange={sample['last_type']}")
+            logger.info(f"Conditions=cond1:{sample['cond1']}, cond2:{sample['cond2']}")
 
-    def test_tick_storage(self, tick_data: pd.DataFrame) -> bool:
-        """Test storing real tick data"""
+    def test_tick_storage(self, tick_data: np.ndarray) -> bool:
+        """Test storing real tick data using existing NumPy conversion"""
         logger.info("=== TESTING TICK STORAGE ===")
 
         try:
-            # Store the real tick data
-            success = self.tick_store.store_ticks(
+            # Store the real tick data using existing store_numpy_ticks method
+            success = self.tick_store.store_numpy_ticks(
                 symbol=self.symbol,
                 date=self.test_date,
-                tick_df=tick_data,
+                tick_array=tick_data,
                 metadata={'data_source': 'iqfeed_real', 'test_run': True},
                 overwrite=True
             )
@@ -173,11 +174,13 @@ class RealTickDataTest:
             logger.error(f"FAILED: Tick storage test error: {e}")
             return False
 
-    def test_real_bar_construction(self, tick_data: pd.DataFrame) -> bool:
+    def test_real_bar_construction(self, tick_data: np.ndarray) -> bool:
         """Test bar construction with real tick data"""
         logger.info("=== TESTING BAR CONSTRUCTION WITH REAL TICKS ===")
 
         try:
+            # Convert NumPy to DataFrame for BarBuilder using existing conversion
+            tick_df = self.tick_store._numpy_ticks_to_dataframe(tick_data)
             # Get AAPL-specific thresholds from config
             bar_configs = {
                 'volume_bars': 100000,
@@ -195,15 +198,15 @@ class RealTickDataTest:
                     logger.info(f"Testing {bar_type} with threshold {threshold}...")
 
                     if bar_type == 'volume_bars':
-                        bars = self.bar_builder.volume_bars(tick_data, threshold)
+                        bars = self.bar_builder.volume_bars(tick_df, threshold)
                     elif bar_type == 'dollar_bars':
-                        bars = self.bar_builder.dollar_bars(tick_data, threshold)
+                        bars = self.bar_builder.dollar_bars(tick_df, threshold)
                     elif bar_type == 'imbalance_bars':
-                        bars = self.bar_builder.imbalance_bars(tick_data, threshold)
+                        bars = self.bar_builder.imbalance_bars(tick_df, threshold)
                     elif bar_type == 'volatility_bars':
-                        bars = self.bar_builder.volatility_bars(tick_data, threshold)
+                        bars = self.bar_builder.volatility_bars(tick_df, threshold)
                     elif bar_type == 'range_bars':
-                        bars = self.bar_builder.range_bars(tick_data, threshold)
+                        bars = self.bar_builder.range_bars(tick_df, threshold)
 
                     if bars.empty:
                         logger.warning(f"WARNING: No {bar_type} generated (may need different threshold)")
@@ -243,13 +246,13 @@ class RealTickDataTest:
             logger.error(f"FAILED: Bar construction test error: {e}")
             return False
 
-    def test_adaptive_calibration(self, tick_data: pd.DataFrame) -> bool:
+    def test_adaptive_calibration(self, tick_data: np.ndarray) -> bool:
         """Test adaptive threshold calibration with real data"""
         logger.info("=== TESTING ADAPTIVE CALIBRATION ===")
 
         try:
-            # Store tick data first (needed for calibration)
-            self.tick_store.store_ticks(self.symbol, self.test_date, tick_data, overwrite=True)
+            # Store tick data first (needed for calibration) using existing method
+            self.tick_store.store_numpy_ticks(self.symbol, self.test_date, tick_data, overwrite=True)
 
             # Test calibration
             logger.info("Running adaptive threshold calibration...")
@@ -267,8 +270,10 @@ class RealTickDataTest:
             # Test with calibrated thresholds
             logger.info("Testing bars with calibrated thresholds...")
 
+            # Convert to DataFrame for bar builder
+            tick_df = self.tick_store._numpy_ticks_to_dataframe(tick_data)
             calibrated_volume_bars = self.bar_builder.volume_bars(
-                tick_data, int(thresholds.get('volume_threshold', 100000))
+                tick_df, int(thresholds.get('volume_threshold', 100000))
             )
 
             if not calibrated_volume_bars.empty:
@@ -330,7 +335,7 @@ class RealTickDataTest:
         logger.info("Getting real tick data for remaining tests...")
         tick_data = self.data_collector.get_tick_data(self.symbol, num_days=1, max_ticks=5000)
 
-        if tick_data is None or tick_data.empty:
+        if tick_data is None or len(tick_data) == 0:
             logger.error("❌ Could not get tick data for remaining tests")
             return False
 

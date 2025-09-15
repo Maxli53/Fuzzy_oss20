@@ -14,7 +14,7 @@ from pathlib import Path
 
 # Import our modules
 from stage_01_data_engine.storage import TickStore, BarBuilder, TimezoneHandler
-from stage_01_data_engine.collector import DataCollector
+from stage_01_data_engine.collectors.iqfeed_collector import IQFeedCollector
 
 # Setup logging
 logging.basicConfig(
@@ -34,7 +34,7 @@ class TickInfrastructureTest:
         self.tick_store = TickStore()
         self.bar_builder = BarBuilder()
         self.timezone_handler = TimezoneHandler()
-        self.data_collector = DataCollector()
+        self.data_collector = IQFeedCollector()
 
         logger.info("Initialized test suite for tick infrastructure")
 

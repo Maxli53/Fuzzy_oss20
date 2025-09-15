@@ -7,7 +7,7 @@ import os
 # Add the project root to the path so we can import our modules
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from stage_01_data_engine.collector import DataCollector
+from stage_01_data_engine.collectors.iqfeed_collector import IQFeedCollector
 import logging
 
 # Set up logging to see what's happening
@@ -27,7 +27,7 @@ def main():
 
     try:
         # Create data collector
-        collector = DataCollector()
+        collector = IQFeedCollector()
 
         # Test with AAPL for 22 trading days
         symbol = "AAPL"
