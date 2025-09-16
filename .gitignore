@@ -87,4 +87,5 @@ mlruns/
 
 # Cache directories
 .cache/
-.pytest_cache/
+.pytest_cache/test_arctic_tz/
+iqfeed_data/

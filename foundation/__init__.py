@@ -44,15 +44,91 @@ from . import timeseries
 from . import utils
 
 # Make commonly used classes available at package level
-from .models.base import BaseFoundationModel
+from .models.base import BaseFoundationModel, TimestampedModel, ValidatedModel
+
+# Market data models
+from .models.market import (
+    TickData,
+    OHLCVBar,
+    OrderBookSnapshot,
+    MarketSession
+)
+
+# Metadata models
+from .models.metadata import (
+    SpreadStatistics,
+    TradeClassification,
+    LiquidityProfile,
+    ExecutionQuality,
+    MarketRegime,
+    ToxicityMetrics,
+    InstitutionalFlow,
+    SymbolDayMetadata,
+    MetadataComputationContext
+)
+
+# Enumerations
+from .models.enums import (
+    TradeSign,
+    TickDirection,
+    ParticipantType,
+    ExchangeCode,
+    TimeInterval,
+    VolatilityRegime,
+    LiquidityState,
+    TrendState,
+    MicrostructureRegime,
+    DataQualityLevel,
+    BarType,
+    TradeCondition
+)
+
 from .utils.logging_config import get_logger
 
 __all__ = [
+    # Core modules
     "models",
     "events",
     "pipeline",
     "timeseries",
     "utils",
+
+    # Base models
     "BaseFoundationModel",
+    "TimestampedModel",
+    "ValidatedModel",
+
+    # Market data models
+    "TickData",
+    "OHLCVBar",
+    "OrderBookSnapshot",
+    "MarketSession",
+
+    # Metadata models
+    "SpreadStatistics",
+    "TradeClassification",
+    "LiquidityProfile",
+    "ExecutionQuality",
+    "MarketRegime",
+    "ToxicityMetrics",
+    "InstitutionalFlow",
+    "SymbolDayMetadata",
+    "MetadataComputationContext",
+
+    # Enumerations
+    "TradeSign",
+    "TickDirection",
+    "ParticipantType",
+    "ExchangeCode",
+    "TimeInterval",
+    "VolatilityRegime",
+    "LiquidityState",
+    "TrendState",
+    "MicrostructureRegime",
+    "DataQualityLevel",
+    "BarType",
+    "TradeCondition",
+
+    # Utilities
     "get_logger"
 ]

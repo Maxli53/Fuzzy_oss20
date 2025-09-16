@@ -73,6 +73,15 @@ graph TD
 
 ---
 
+## Timezone Policy: Eastern Time (ET) Exclusively
+
+All timestamps throughout the system use Eastern Time (America/New_York) because:
+- US equity markets operate in ET
+- IQFeed provides data in ET natively
+- Market events (open/close) are defined in ET
+- No timezone conversion errors
+- Automatic DST handling
+
 ## Stage 1: Data Engine
 
 ### Purpose
@@ -1524,7 +1533,7 @@ class TickData(BaseModel):
 
     # Primary fields
     symbol: str = Field(..., min_length=1, max_length=10, regex=r'^[A-Z0-9._]+$')
-    timestamp: datetime = Field(..., description="Always UTC timezone")
+    timestamp: datetime = Field(..., description="Always ET timezone")
     price: Decimal = Field(..., gt=0, decimal_places=4)
     size: int = Field(..., gt=0)
 
@@ -1534,14 +1543,14 @@ class TickData(BaseModel):
 
     # Data quality and lineage
     record_id: uuid.UUID = Field(default_factory=uuid.uuid4)
-    source_timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    source_timestamp: datetime = Field(default_factory=lambda: datetime.now(pytz.timezone('America/New_York')))
     data_quality_score: float = Field(default=1.0, ge=0.0, le=1.0)
 
     @validator('timestamp', 'source_timestamp')
-    def validate_utc_timezone(cls, v):
+    def validate_et_timezone(cls, v):
         if v.tzinfo is None:
             raise ValueError('Timestamp must have timezone info')
-        return v.astimezone(timezone.utc)
+        return v.astimezone(pytz.timezone('America/New_York'))
 
     @root_validator
     def validate_timestamps(cls, values):
@@ -1558,7 +1567,7 @@ class OHLCVBar(BaseModel):
     """OHLCV bar data with validation and consistency checks"""
 
     symbol: str = Field(..., min_length=1, max_length=10)
-    timestamp: datetime = Field(..., description="Bar start time in UTC")
+    timestamp: datetime = Field(..., description="Bar start time in ET")
 
     open_price: Decimal = Field(..., gt=0, decimal_places=4)
     high_price: Decimal = Field(..., gt=0, decimal_places=4)
@@ -1642,7 +1651,7 @@ class SystemEvent(BaseModel):
     # Event identification
     event_id: uuid.UUID = Field(default_factory=uuid.uuid4)
     event_type: EventType
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(pytz.timezone('America/New_York')))
 
     # Event metadata
     source_component: str = Field(..., min_length=1)
@@ -1838,7 +1847,7 @@ class ResourceLimits(BaseModel):
 class ResourceUsage(BaseModel):
     """Current resource usage metrics"""
 
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(pytz.timezone('America/New_York')))
 
     # Current usage
     cpu_percent: float = Field(..., ge=0.0, le=100.0)
@@ -1902,7 +1911,7 @@ class ResourceGovernor(BaseModel):
         if not self.circuit_open_until:
             return False
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(pytz.timezone('America/New_York'))
         if now >= self.circuit_open_until:
             self.circuit_state = CircuitBreakerState.HALF_OPEN
             return True
@@ -1918,7 +1927,7 @@ class ResourceGovernor(BaseModel):
 
     def record_failure(self):
         """Record failed operation"""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(pytz.timezone('America/New_York'))
         self.last_failure_time = now
 
         if self.circuit_state == CircuitBreakerState.HALF_OPEN:
@@ -1946,7 +1955,7 @@ T = TypeVar('T', bound=BaseModel)
 class TimePoint(BaseModel, Generic[T]):
     """Single point in time with associated data"""
 
-    timestamp: datetime = Field(..., description="UTC timestamp")
+    timestamp: datetime = Field(..., description="ET timestamp")
     value: T
 
     # Data quality indicators
@@ -1967,7 +1976,7 @@ class TimeSeries(BaseModel, Generic[T]):
 
     # Time series metadata
     frequency: Optional[str] = None  # e.g., "1s", "1m", "1h"
-    time_zone: str = Field(default="UTC")
+    time_zone: str = Field(default="America/New_York")
 
     class Config:
         arbitrary_types_allowed = True
@@ -2077,7 +2086,7 @@ class DataQualityIssue(BaseModel):
     actual_value: Optional[Any] = None
 
     # Detection metadata
-    detected_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    detected_at: datetime = Field(default_factory=lambda: datetime.now(pytz.timezone('America/New_York')))
     detection_rule: str
 
     # Resolution tracking
@@ -2125,7 +2134,7 @@ class DataQualityReport(BaseModel):
     """Comprehensive data quality report"""
 
     report_id: uuid.UUID = Field(default_factory=uuid.uuid4)
-    generated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    generated_at: datetime = Field(default_factory=lambda: datetime.now(pytz.timezone('America/New_York')))
 
     # Reporting period
     period_start: datetime
@@ -2199,7 +2208,7 @@ class WorkflowTask(BaseModel):
 
     # Task execution state
     status: TaskStatus = TaskStatus.CREATED
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(pytz.timezone('America/New_York')))
     scheduled_at: Optional[datetime] = None
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
@@ -2228,7 +2237,7 @@ class WorkflowTask(BaseModel):
     def mark_completed(self, result_data: Optional[Dict[str, Any]] = None):
         """Mark task as completed"""
         self.status = TaskStatus.COMPLETED
-        self.completed_at = datetime.now(timezone.utc)
+        self.completed_at = datetime.now(pytz.timezone('America/New_York'))
         self.result_data = result_data
 
     def mark_failed(self, error_message: str, error_details: Optional[Dict[str, Any]] = None):
@@ -2254,7 +2263,7 @@ class WorkflowDefinition(BaseModel):
 
     # Metadata
     created_by: str
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(pytz.timezone('America/New_York')))
     version: str = Field(default="1.0.0")
 
     def add_task(self, task: WorkflowTask, depends_on: Optional[List[uuid.UUID]] = None):
@@ -2328,7 +2337,7 @@ class WorkflowOrchestrator(BaseModel):
         """Start a new workflow execution"""
         execution = WorkflowExecution(workflow_definition=workflow_definition)
         execution.status = TaskStatus.RUNNING
-        execution.started_at = datetime.now(timezone.utc)
+        execution.started_at = datetime.now(pytz.timezone('America/New_York'))
 
         self.active_executions[execution.execution_id] = execution
         return execution.execution_id
@@ -2348,7 +2357,7 @@ class WorkflowOrchestrator(BaseModel):
         for task in ready_tasks:
             if task.status == TaskStatus.SCHEDULED:
                 task.status = TaskStatus.RUNNING
-                task.started_at = datetime.now(timezone.utc)
+                task.started_at = datetime.now(pytz.timezone('America/New_York'))
                 execution.running_task_ids.add(task.task_id)
 
                 # Here we would actually execute the task
@@ -2359,7 +2368,7 @@ class WorkflowOrchestrator(BaseModel):
         # Check if execution is complete
         if execution.is_complete():
             execution.status = TaskStatus.COMPLETED
-            execution.completed_at = datetime.now(timezone.utc)
+            execution.completed_at = datetime.now(pytz.timezone('America/New_York'))
 ```
 
 ### Implementation Strategy

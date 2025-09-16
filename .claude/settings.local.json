@@ -27,7 +27,17 @@
       "Bash(mv:*)",
       "Bash(dir:*)",
       "Bash(cmd /c dir:*)",
-      "Bash(cmd /c:*)"
+      "Bash(cmd /c:*)",
+      "Bash(for dir in foundation/*/)",
+      "Bash(do [ ! -f \"$dir__init__.py\" ])",
+      "Bash(done)",
+      "Bash(sed:*)",
+      "Bash(git rm:*)",
+      "Bash(taskkill:*)",
+      "Bash(where:*)",
+      "Bash(\"C:\\Program Files\\DTN\\IQFeed\\iqconnect.exe\" -product FUZZY_OSS20 -version 1.0 -login 487854 -password t1wnjnuz -autoconnect -savelogininfo)",
+      "Bash(\"C:\\Program Files\\DTN\\IQFeed\\iqconnect.exe\" -product FUZZY_OSS20 -version 1.0 -login 487854 -password LTKKma0 -autoconnect -savelogininfo)",
+      "Read(//c/Users/maxli/PycharmProjects/PythonProject/**)"
     ],
     "deny": [],
     "ask": []

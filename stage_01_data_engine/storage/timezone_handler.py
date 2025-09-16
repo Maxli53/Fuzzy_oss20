@@ -1,5 +1,6 @@
 """
 Exchange timezone handling for accurate tick data timestamps
+All timestamps are maintained in ET (Eastern Time) for US equity markets
 """
 import pytz
 import pandas as pd
@@ -45,7 +46,7 @@ class TimezoneHandler:
             name: pytz.timezone(tz_str)
             for name, tz_str in self.EXCHANGE_TIMEZONES.items()
         }
-        self.utc = pytz.UTC
+        self.et = pytz.timezone('America/New_York')  # Primary timezone for US markets
 
     def get_exchange_for_symbol(self, symbol: str) -> str:
         """Get primary exchange for symbol"""
@@ -58,7 +59,7 @@ class TimezoneHandler:
         Normalize timestamp to exchange local time
 
         Args:
-            timestamp: Input timestamp (may be UTC or naive)
+            timestamp: Input timestamp (may be ET or naive)
             symbol: Stock symbol
             exchange: Override exchange (if known)
 
@@ -75,7 +76,7 @@ class TimezoneHandler:
         target_tz = self.timezones[exchange]
 
         try:
-            # If timestamp is naive, assume it's already in exchange timezone
+            # If timestamp is naive, assume it's already in ET
             if timestamp.tz is None:
                 localized_ts = target_tz.localize(timestamp.to_pydatetime())
             else:

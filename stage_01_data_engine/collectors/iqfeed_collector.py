@@ -48,22 +48,23 @@ class IQFeedCollector:
         logger.info("IQFeedCollector initialized with direct PyIQFeed (NO WRAPPERS)")
 
     def ensure_connection(self) -> bool:
-        """Ensure IQFeed service is running (following official example.py pattern)."""
+        """Ensure IQFeed service is accessible (skip problematic launch)."""
         try:
-            # Initialize service following official pattern if not done
-            if not self.service:
-                self.service = iq.FeedService(
-                    product=self.product_id,
-                    version=self.version,
-                    login=os.getenv('IQFEED_USERNAME', '487854'),
-                    password=os.getenv('IQFEED_PASSWORD', 't1wnjnuz')
-                )
-                self.service.launch(headless=True)
-                logger.info("IQFeed service launched successfully")
-            return True
+            # BREAKTHROUGH: We discovered that service.launch() fails even when IQConnect
+            # is running properly, but direct connections work fine.
+            # So we skip the service launch and work directly with the running IQConnect.
+
+            # Test if IQConnect is accessible by trying a simple history connection
+            test_conn = iq.HistoryConn(name="test-connection")
+
+            with iq.ConnConnector([test_conn]) as connector:
+                # Simple connectivity test - just create connection
+                logger.info("IQFeed connection test successful - IQConnect is accessible")
+                return True
 
         except Exception as e:
-            logger.error(f"Connection setup failed: {e}")
+            logger.error(f"IQFeed connectivity test failed: {e}")
+            logger.error("Make sure IQConnect.exe is running with correct credentials")
             return False
 
     def get_tick_data(self, ticker: str, num_days: int = 1, max_ticks: int = 10000) -> Optional[np.ndarray]:
@@ -118,7 +119,10 @@ class IQFeedCollector:
         # ================================================================================
         # If today is Saturday/Sunday/holiday, we automatically adjust to last trading day
         # This prevents "NO_DATA" errors when requesting data on non-trading days
-        today = datetime.now().date()
+        # Use ET for all date/time operations
+        import pytz
+        et_tz = pytz.timezone('America/New_York')
+        today = datetime.now(et_tz).date()
         adjusted_date, adjustment_metadata = self.session_manager.adjust_request_date(today, ticker)
 
         if adjustment_metadata['adjustment_reason'] != 'none':
@@ -140,9 +144,12 @@ class IQFeedCollector:
                 # - During market hours (9:30-16:00 ET weekdays): Limited to 8 days
                 # - After hours/weekends: Can get up to 180 days!
 
-                # Check current time
-                is_weekend = datetime.now().weekday() >= 5  # Saturday=5, Sunday=6
-                is_after_hours = datetime.now().hour >= 16 or datetime.now().hour < 9  # After 4pm or before 9am
+                # Check current time in ET (market timezone)
+                import pytz
+                et_tz = pytz.timezone('America/New_York')
+                now_et = datetime.now(et_tz)
+                is_weekend = now_et.weekday() >= 5  # Saturday=5, Sunday=6
+                is_after_hours = now_et.hour >= 16 or now_et.hour < 9  # After 4pm or before 9am ET
 
                 if is_weekend or is_after_hours:
                     # ============================================================================
@@ -209,7 +216,10 @@ class IQFeedCollector:
             return None
 
         # Universal smart fallback
-        today = datetime.now().date()
+        # Use ET for all date/time operations
+        import pytz
+        et_tz = pytz.timezone('America/New_York')
+        today = datetime.now(et_tz).date()
         adjusted_date, adjustment_metadata = self.session_manager.adjust_request_date(today, ticker)
 
         if adjustment_metadata['adjustment_reason'] != 'none':
@@ -261,7 +271,10 @@ class IQFeedCollector:
             return None
 
         # Universal smart fallback
-        today = datetime.now().date()
+        # Use ET for all date/time operations
+        import pytz
+        et_tz = pytz.timezone('America/New_York')
+        today = datetime.now(et_tz).date()
         adjusted_date, adjustment_metadata = self.session_manager.adjust_request_date(today, ticker)
 
         if adjustment_metadata['adjustment_reason'] != 'none':
@@ -803,9 +816,9 @@ class IQFeedCollector:
 
             with iq.ConnConnector([news_conn]) as connector:
                 if bgn_dt is None:
-                    bgn_dt = datetime.now() - timedelta(days=7)
+                    bgn_dt = datetime.now(et_tz) - timedelta(days=7)
                 if end_dt is None:
-                    end_dt = datetime.now()
+                    end_dt = datetime.now(et_tz)
 
                 logger.info(f"Getting story counts for {len(symbols)} symbols from {bgn_dt} to {end_dt}")
 
@@ -855,7 +868,7 @@ class IQFeedCollector:
 
                 # Collect connection info
                 stats = {
-                    'timestamp': datetime.now().isoformat(),
+                    'timestamp': datetime.now(et_tz).isoformat(),
                     'product_id': self.product_id,
                     'version': self.version,
                     'connection_active': True

@@ -14,7 +14,8 @@ Example real tick:
 
 import numpy as np
 from decimal import Decimal
-from datetime import datetime, timezone, date, time
+from datetime import datetime, date, time
+import pytz
 from typing import Optional, List, Union
 
 from foundation.models.market import TickData
@@ -24,14 +25,14 @@ from foundation.models.enums import TradeSign
 def combine_date_time(date_val: Union[str, np.datetime64, date],
                      time_val: Union[int, np.timedelta64]) -> datetime:
     """
-    Combine IQFeed date and time fields into UTC datetime.
+    Combine IQFeed date and time fields into ET datetime.
 
     Args:
         date_val: Date from IQFeed (string, numpy datetime64, or date object)
         time_val: Time from IQFeed (int microseconds or numpy timedelta64)
 
     Returns:
-        Combined datetime in UTC
+        Combined datetime in ET (Eastern Time)
     """
     # Handle different date formats
     if isinstance(date_val, np.datetime64):
@@ -68,13 +69,12 @@ def combine_date_time(date_val: Union[str, np.datetime64, date],
     # Create time object
     time_obj = time(hour=hours, minute=minutes, second=seconds, microsecond=microseconds)
 
-    # Combine into datetime (assume ET timezone, convert to UTC)
+    # Combine into datetime
     dt = datetime.combine(date_obj, time_obj)
 
-    # IQFeed times are in ET, convert to UTC
-    # Note: This is a simplified conversion. In production, you'd want proper timezone handling
-    # For now, we'll treat as UTC since the exact timezone conversion depends on DST rules
-    return dt.replace(tzinfo=timezone.utc)
+    # IQFeed times are in ET - keep them in ET
+    et_tz = pytz.timezone('America/New_York')
+    return et_tz.localize(dt)
 
 
 def decode_exchange_code(exchange_bytes: Union[bytes, str]) -> str:
@@ -120,13 +120,14 @@ def classify_trade_direction(price: float, bid: Optional[float], ask: Optional[f
         return 0  # At midpoint (unknown)
 
 
-def convert_iqfeed_tick_to_pydantic(iqfeed_tick: np.void, symbol: str) -> TickData:
+def convert_iqfeed_tick_to_pydantic(iqfeed_tick: np.void, symbol: str, tick_sequence: int = 0) -> TickData:
     """
     Convert single IQFeed numpy tick to Pydantic TickData model.
 
     Args:
         iqfeed_tick: Single tick from IQFeed numpy structured array
         symbol: Trading symbol (e.g., 'AAPL')
+        tick_sequence: Sequence number for trades at same timestamp
 
     Returns:
         TickData Pydantic model
@@ -184,6 +185,7 @@ def convert_iqfeed_tick_to_pydantic(iqfeed_tick: np.void, symbol: str) -> TickDa
     # Pre-compute derived fields to avoid model recursion
     tick_data = {
         "symbol": symbol,
+        "tick_id": tick_id,  # Add IQFeed tick ID for debugging
         "timestamp": timestamp,
         "price": Decimal(str(price)),
         "size": size,
@@ -192,6 +194,7 @@ def convert_iqfeed_tick_to_pydantic(iqfeed_tick: np.void, symbol: str) -> TickDa
         "total_volume": total_volume,
         "conditions": conditions,
         "trade_sign": trade_sign,
+        "tick_sequence": tick_sequence,  # Add sequence number
     }
 
     # Add optional bid/ask
@@ -218,6 +221,16 @@ def convert_iqfeed_tick_to_pydantic(iqfeed_tick: np.void, symbol: str) -> TickDa
     # Pre-compute dollar volume
     tick_data["dollar_volume"] = Decimal(str(price)) * Decimal(str(size))
 
+    # Calculate price improvement (negative means worse execution)
+    if trade_sign == 1 and midpoint is not None:
+        # For buy trades: positive if below midpoint, negative if above
+        tick_data["price_improvement"] = midpoint - Decimal(str(price))
+    elif trade_sign == -1 and midpoint is not None:
+        # For sell trades: positive if above midpoint, negative if below
+        tick_data["price_improvement"] = Decimal(str(price)) - midpoint
+    else:
+        tick_data["price_improvement"] = None
+
     # Set block trade flag
     tick_data["is_block_trade"] = size >= 10000
 
@@ -226,8 +239,10 @@ def convert_iqfeed_tick_to_pydantic(iqfeed_tick: np.void, symbol: str) -> TickDa
 
     # Set specific condition flags based on common IQFeed codes
     tick_data["is_extended_hours"] = cond1 == 135 or cond2 == 135
-    tick_data["is_odd_lot"] = cond1 == 23 or cond2 == 23 or cond3 == 23
+    tick_data["is_odd_lot"] = cond3 == 23  # Per Data_policy.md: only check cond3
     tick_data["is_intermarket_sweep"] = cond1 == 37 or cond2 == 37
+    tick_data["is_derivatively_priced"] = cond2 == 61  # Per Data_policy.md
+    tick_data["is_qualified"] = True  # Default per Data_policy.md
 
     return TickData(**tick_data)
 
@@ -235,13 +250,14 @@ def convert_iqfeed_tick_to_pydantic(iqfeed_tick: np.void, symbol: str) -> TickDa
 def convert_iqfeed_ticks_to_pydantic(iqfeed_data: np.ndarray, symbol: str) -> List[TickData]:
     """
     Convert multiple IQFeed numpy ticks to Pydantic TickData models.
+    Assigns sequence numbers for trades at the same timestamp.
 
     Args:
         iqfeed_data: Numpy structured array from IQFeed
         symbol: Trading symbol (e.g., 'AAPL')
 
     Returns:
-        List of TickData Pydantic models
+        List of TickData Pydantic models with sequence numbers
 
     Example:
         >>> data = hist_conn.request_ticks("AAPL", max_ticks=100)
@@ -249,9 +265,26 @@ def convert_iqfeed_ticks_to_pydantic(iqfeed_data: np.ndarray, symbol: str) -> Li
     """
     tick_models = []
 
+    # Track timestamps for sequence numbering
+    last_timestamp = None
+    sequence = 0
+
     for iqfeed_tick in iqfeed_data:
         try:
-            tick_model = convert_iqfeed_tick_to_pydantic(iqfeed_tick, symbol)
+            # Calculate timestamp for this tick to determine sequence number
+            date_val = iqfeed_tick[1]
+            time_val = iqfeed_tick[2]
+            current_timestamp = combine_date_time(date_val, time_val)
+
+            # Assign sequence number based on timestamp
+            if last_timestamp is not None and current_timestamp == last_timestamp:
+                sequence += 1
+            else:
+                sequence = 0
+                last_timestamp = current_timestamp
+
+            # Convert with sequence number
+            tick_model = convert_iqfeed_tick_to_pydantic(iqfeed_tick, symbol, tick_sequence=sequence)
             tick_models.append(tick_model)
         except Exception as e:
             # Log error but continue processing other ticks

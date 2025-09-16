@@ -5,8 +5,8 @@ data_sources:
   iqfeed:
     host: "localhost"
     port: 9100
-    username: "${IQFEED_USERNAME}"
-    password: "${IQFEED_PASSWORD}"
+    username: "${487854}"
+    password: "${LTKKma0}"
     real_time: true
     instruments:
       - "SPY"
