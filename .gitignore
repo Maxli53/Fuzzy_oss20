@@ -87,5 +87,19 @@ mlruns/
 
 # Cache directories
 .cache/
-.pytest_cache/test_arctic_tz/
+.pytest_cache/
+
+# ArcticDB and large data files
+arctic_storage/
+test_arctic_tz/
+*.mdb
+*.lmdb
 iqfeed_data/
+
+# Node modules
+node_modules/
+frontend/build/
+frontend/.env.local
+
+# Docker
+docker-compose.override.yml
